@@ -1,4 +1,4 @@
-/* $Id: version.h,v 1.1 1998/11/11 14:53:32 dirkx Exp $
+/* $Id: version.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  */
 int get_version(void);
 char * get_full(void);

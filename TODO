@@ -3,21 +3,30 @@ RDFStore - TODO list
 RDF Parsers
 
 * aboutEach and aboutEachPrefix
-* write a new fast pure Perl RDF parser using regexs
+* containers (see http://www-uk.hpl.hp.com/people/bwm/rdf/issues/containersyntax/current.htm)
+* integrate latest RDF-Core WG resolved issues (see http://www.w3.org/2000/03/rdf-tracking/#attention-developers)
+* write a new fast pure Perl RDF parser using regexs such as (T)REX (see also http://www.openhealth.org/RDF/RDFSurfaceSyntax)
+* N3 parser
 
 MagicTie
 
 * fix and finish ARRAY support
 * fix problems with implicit/auto-generated datastructures like $a->{b}->{c}
-* add rdfdb.pm style
+* add rdfdb Data::MagicTie style
+
+DBMS
+
+* better testing and make it portable
 
 RDF API
 
-* Query API
-* Ultimate support SchemaModel
-* Model versioning and change tracking
-* Model timestamps (last modified, creation date)
-* Serialisation of stored statements and models
-* Mapping/cross-walking between models (schema) to achive soemthing liek $uri1=$uri2
-* Start up a DAML set of modules to build generic things....
+* new indexing model using 3D sparse matrixes and RLE encoding
 * TIE interface over the whole RDFStore packages
+* think about integration with rdfapi_perl (see http://xml.jrc.it/rdfapi_perl/)
+* query API (SQUISH)
+* ultimate support SchemaModel
+* model versioning and change tracking
+* model timestamps (last modified, creation date)
+* serialisation of stored statements and models (not only Strawman)
+* mapping/cross-walking/dumb-down between models (schema) to achive soemthing liek $uri1=$uri2
+* start up a DAML set of modules to build generic things....

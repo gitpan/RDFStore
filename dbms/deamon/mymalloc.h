@@ -1,4 +1,4 @@
-/* $Id: mymalloc.h,v 1.3 1998/11/11 14:52:52 dirkx Exp $
+/* $Id: mymalloc.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  */
 char * memdup( void * data, size_t size );
 

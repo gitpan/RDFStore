@@ -1,25 +1,21 @@
-print "1..6\n";
-use DBMS;
-
 $|=1;
-tie %a ,DBMS,'aah' and print "ok\n" or die "could not connect $!";
-tie %b ,DBMS,'bee' and print "ok\n" or die "could not connect $!";
-$a{ key_in_a } = val_in_a;
-$b{ key_in_b } = val_in_b;
-untie %b;
-untie %a;
+$N=shift || 500;
+use DBMS;
+use Fcntl;
+no strict;
 
-tie %c ,DBMS,'cee' and print "ok\n" or die "could not connect $!";
-$c{ key_in_c } = val_in_c;
-untie %c;
+foreach $db (1 .. 5) {
+$a=tie %aap, 'DBMS','zappazoink'.$db,O_CREAT | O_RDWR 
+	or die "E= $DBMS::DBMS_ERROR $::DBMS_ERROR $! $@ $?";
 
-tie %a ,DBMS,'aah' and print "ok\n" or die "could not connect $!";
-tie %b ,DBMS,'bee' and print "ok\n" or die "could not connect $!";
-$a{ key_in_a } = val_in_a;
-$b{ key_in_b } = val_in_b;
-untie %b;
-untie %a;
+for $i (1..$N) {
+	$aap{ $i } = $i;# print "FAIL $::DBMS_ERROR";
+	};
 
-tie %c ,DBMS,'cee' and print "ok\n" or die "could not connect $!";
-$c{ key_in_c } = val_in_c;
-untie %c;
+for $i (1..$N) {
+	($c=$aap{ $i }) == $i || print "\nVal Fault\n";
+	print "\nFAIL $::DBMS_ERROR $!\n" unless defined $c;
+	};
+
+untie %aap;
+}

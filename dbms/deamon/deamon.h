@@ -1,4 +1,4 @@
-/* $Id: deamon.h,v 1.5 1999/01/04 19:59:08 dirkx Exp $
+/* $Id: deamon.h,v 1.2 2001/06/18 15:26:18 reggiori Exp $
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +21,11 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <db.h>                               
+#ifdef BSD
+#include <db.h>
+#else
+#include <db_185.h>
+#endif
 
 #include "dbms.h"
 
@@ -88,11 +92,16 @@ typedef struct dbase {
 #ifdef FORKING	
 	struct child_rec * handled_by;
 #endif
-	char * my_dir;
-	char 	* name;
 	int	  sname;
-	int	mode;
+	int	  mode;
+#ifdef STATIC_BUFF
+	char	pfile[ MAX_STATIC_PFILE ];
+	char 	name[ MAX_STATIC_NAME ];
+#else
 	char	* pfile;
+	char 	* name;
+#endif
+	char    * my_dir;
 	DB	* handle;
 	int	  lastfd; /* last FD from which a cursor was set */
 	int	  num_cls; /* Number of Clients served */
@@ -102,9 +111,9 @@ typedef struct dbase {
 
 typedef struct connection {
 
-        int             type; /* one of C_MUM, C_CHILD, ... */
+   int	type; /* one of C_MUM, C_CHILD, ... */
 
-	int	   	clientfd;
+	int      clientfd;
 	char	*	my_dir;
 
 	struct sockaddr_in address;
@@ -112,8 +121,17 @@ typedef struct connection {
 	DBT	v1;
 	DBT	v2;
 
+#ifdef STATIC_CS_BUFF
+	char	sendbuff[ MAX_CS_PAYLOAD ];
+#else
 	char	* sendbuff;
+#endif
+
+#ifdef STATIC_SC_BUFF
+	char	recbuff[ MAX_SC_PAYLOAD ];
+#else
 	char 	* recbuff;
+#endif
 
 	struct dbase	* dbp;
 
@@ -139,9 +157,9 @@ typedef struct command_req {
 	char * info;
 	int cnt;
         void (*handler)(connection * r);
-        }  command_req;
+        } command_req;
 
-extern struct command_req cmd_table[14];
+extern struct command_req cmd_table[ TOKEN_MAX ];
 
 #define	L_FATAL		-2
 #define	L_ERROR 	-1
@@ -180,4 +198,7 @@ void continue_send( connection * r );
 void final_read( connection * r) ;
 void initial_read( connection * r );
 void continue_read( connection * r );
+
+extern int client_counter;
+
 #endif

@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.10 1999/01/04 22:31:57 dirkx Exp $
+/* $Id: main.c,v 1.2 2001/06/18 15:26:18 reggiori Exp $
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA
  *     Dirk.vanGulik@jrc.it
@@ -14,7 +14,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <db.h>
 #include <pwd.h>
 #include <syslog.h>
 #include <fcntl.h>
@@ -35,6 +34,12 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+
+#ifdef BSD
+#include <db.h>
+#else
+#include <db_185.h>
+#endif
 
 #include "dbms.h"
 #include "dbmsd.h"
@@ -95,12 +100,12 @@ reply_log(connection * r, int level, char * fmt, ...)
 {
 	char tmp[ 1024 ];
 	va_list	ap;
+	pid_t p = getpid();
 	DBT v;
 		
 	if (level<=verbose) {
-		int p=getpid();
 	 	snprintf(tmp,1024,"%d:%s %s %s",p,
-			(p==mum_pid) ? "Mum" : "Cld",
+			(!mum_pid) ? "Mum" : "Cld",
 			exp[ level - L_FATAL ],
 			fmt);
 
@@ -122,13 +127,13 @@ log(int level, char * fmt, ...)
 {
 	char tmp[ 1024 ];
 	va_list	ap;
-	int p=getpid();
+	pid_t p = getpid();
 
 	if (level>verbose) 
 		return;	
 
 	snprintf(tmp,1024,"%d:%s %s %s",p,
-		(p==mum_pid) ? "Mum" : "Cld",
+		(!mum_pid) ? "Mum" : "Cld",
 		exp[ level - L_FATAL ],
 		fmt);
 
@@ -141,17 +146,16 @@ trace(char * fmt, ...)
 {
         char tmp[ 1024 ];
         va_list ap;
-        pid_t p;
 	clock_t tt;
+	pid_t p = getpid();
 
 	if (!trace_on) return;
 	
 	time(&tt);
-	p=getpid();
 
         snprintf(tmp,1024,"%d:%s %20s\t%s\n",
 		p,
-                (p==mum_pid) ? "Mum" : "Cld",
+                (!mum_pid) ? "Mum" : "Cld",
 		asctime(gmtime(&tt)),
                 fmt
 		);
@@ -193,7 +197,8 @@ void dumpie ( int i ) {
 #ifdef FORKING
 	fprintf(f,"# Children\n");
 	for( c=children; c; c=c->nxt) {
-		fprintf(f," %7p Pid %5d conn=%p fd=%d",c,c->pid,c->r,c->r ? c->r->clientfd : -1);
+		fprintf(f," %7p Pid %5d conn=%p fd=%d",
+			c,c->pid,c->r,c->r ? c->r->clientfd : -1);
 		for( d=first_dbp; d; d=d->nxt ) if (d->handled_by == c)
 			fprintf(f,"\t%7p %s\n",d,d->name);
 		};
@@ -208,7 +213,8 @@ void dumpie ( int i ) {
 	
 	fprintf(f,"# Clients\n");
 	for( r=client_list; r; r=r->next)
-		fprintf(f," %7p fd=%d type=%d Dbase %7p %s\n",r,r->clientfd,r->type,r->dbp,
+		fprintf(f," %7p fd=%d type=%d Dbase %7p %s\n",
+			r,r->clientfd,r->type,r->dbp,
 			( r->dbp ? r->dbp->name : 0));
 
 	fprintf(f,"# Stats\n");
@@ -231,7 +237,7 @@ void childied( int i ) {
 		log(L_INFORM,"Skeduled to zap one of my children pid=%d",pid);
 		for(c=children;c;c=c->nxt) 
 			if (c->pid == pid) 
-				c->close = 1;
+				c->close = 1; MX;
 #endif
 		}
 
@@ -251,7 +257,6 @@ void childied( int i ) {
 int
 main( int argc, char * argv[]) 
 {
-
  	struct sockaddr_in  	server;
 	int 			port;
 	int 			dtch=1;
@@ -417,12 +422,12 @@ main( int argc, char * argv[])
 #else
 		fprintf(stderr,"No forking compiled in, no detach\n");
 #endif
-		};
 
-        /* become session leader 
-	 */
-        if ((mum_pgid = setsid())<0)
-		barf("Could not become session leader");
+	        /* become session leader 
+		 */
+       		if ((mum_pgid = setsid())<0)
+			barf("Could not become session leader");
+		};
 
 	/* XXX security hole.. yes I know... 
 	 */
@@ -444,7 +449,7 @@ main( int argc, char * argv[])
         umask(0);               /* clear our file mode creation mask */
 #endif
 
-	mum_pid = getpid();
+	mum_pid = 0;
 
 	FD_ZERO(&allrset);
 	FD_ZERO(&allwset);
@@ -454,7 +459,6 @@ main( int argc, char * argv[])
 	FD_SET(sockfd,&alleset);
 
 	maxfd=sockfd;
-
 	client_list=NULL;
 
 	log(L_INFORM,"Waiting for connections");
@@ -479,6 +483,8 @@ main( int argc, char * argv[])
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = SA_RESTART;
 	sigaction(SIGPIPE,&act,&oact);
+
+	init_cmd_table();
 
 	select_loop(); 
 		/* get down to handling.. (as the mother) */

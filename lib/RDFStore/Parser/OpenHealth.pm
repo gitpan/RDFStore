@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -31,13 +30,16 @@
 # *		- changed wget() Socket handle to work with previous Perl versions (not my $handle) and
 # *               do HTTP GET even on HTTP 'Location' redirect header
 # *		- little change when checking if a prefix is undefined
+# *     version 0.4
+# *		- changed way to return undef in subroutines
+# *		- fixed a few warnings
+# *		- fixed warnings in getAttributeValue()
 # *
 
 package RDFStore::Parser::OpenHealth;
 {
+	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $ENABLE_EXPERIMENTAL $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
 	use strict;
-
-	use vars qw($VERSION %Built_In_Styles);
 	use Carp qw(carp croak cluck confess);
 	use URI;
 	use URI::Escape;
@@ -99,7 +101,7 @@ sub new {
 	    		$stylepkg = "\u$style";
 	    		croak "Undefined style: $style" 
 				unless defined($Built_In_Styles{$stylepkg});
-	    		$stylepkg = 'RDFStore::Parser::SiRPAC::' . $stylepkg;
+	    		$stylepkg = 'RDFStore::Parser::OpenHealth::' . $stylepkg;
 		}
 
 		my $htype;
@@ -196,8 +198,17 @@ sub parse_start {
 
 	$firstnb->{parser_parameters} = \@parser_parameters;
 
-	$firstnb->{FinalHandler} = $final
-		if defined($final);
+	#if(defined($final)) {
+        #        $firstnb->{FinalHandler} = sub {
+        #                my $r= &$final($_[0]);
+        #                $_[0]->release;
+        #                return $r;
+        #        };
+        #} else {
+        #        $firstnb->{FinalHandler} = sub {
+        #                $_[0]->release;
+        #        };
+        #};
 
 	return $firstnb;
 };
@@ -360,14 +371,14 @@ sub wget {
         if (!($line =~ m#^HTTP/(\d+)\.(\d+) (\d\d\d) (.+)$#)) {
                 close(S);
                 warn "Did not get HTTP/X.X header back...$line";
-                return undef;
+                return;
         };
         my $status = $3;
         my $reason = $4;
         if ( ($status != 200) && ($status != 302) ) {
                 close(S);
                 warn "Error MSG returned from server: $status $reason\n";
-                return undef;
+                return;
         };
         while(<S>) {
                 chomp;
@@ -389,16 +400,18 @@ sub wget {
 sub getAttributeValue {
 	my ($expat,$attlist, $elName) = @_;
 
-  	return undef
+  	return
 		if(!@{$attlist});
 
 	my $n;
 	for($n=0; $n<=$#{$attlist}; $n+=2) {
-    		my $attname = $attlist->[$n]->[0].$attlist->[$n]->[1];
+    		my $attname = $attlist->[$n]->[0];
+		$attname .= $attlist->[$n]->[1]
+			if(defined $attlist->[$n]->[1]);
     		return $attlist->[$n+1]
 			if ($attname eq $elName);
   	};
-  	return undef;
+  	return;
 }
 
 sub RDFXML_StartElementHandler {
@@ -543,7 +556,7 @@ RDFStore::Parser::OpenHealth - This module implements an RDF strawman parser for
 	use RDFStore;
 	my $pstore=new RDFStore::Parser::OpenHealth(
                 ErrorContext 	=> 2,
-                Style 		=> 'RDFStore::Parser::SiRPAC::RDFStore',
+                Style 		=> 'RDFStore::Parser::Styles::MagicTie',
                 NodeFactory     => new RDFStore::NodeFactory(),
                 store   =>      {
                                 	persistent      =>      1,
@@ -596,5 +609,5 @@ RDF Schema Specification 1.0 - http://www.w3.org/TR/2000/CR-rdf-schema-20000327
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>
 	Clark Cooper is the author of the XML::Parser(3) module together with Larry wall

@@ -1,0 +1,612 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:x="http://www.openhealth.org/XSet">
+   <rdfs:Class rdf:ID="document">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="characters">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="S">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="NameChar">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Name">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Names">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Nmtoken">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Nmtokens">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EntityValue">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="AttValue">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="SystemLiteral">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PubidLiteral">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PubidChar">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CharData">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Comment">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PI">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PITarget">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CDSect">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CDStart">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CData">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#String"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CDEnd">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="prolog">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="XMLDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="VersionInfo">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Eq">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="VersionNum">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Misc">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="doctypedecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="markupdecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="extSubset">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="extSubsetDecl">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="SDDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="LanguageID">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Langcode">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="ISO639Code">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="IanaCode">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="UserCode">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="SubCode">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="element">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="STag">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Attribute">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="ETag">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="content">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EmptyElemTag">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="elementdecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="contentspec">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="children">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="cp">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="choice">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="seq">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Mixed">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="AttlistDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="AttDef">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="AttType">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="StringType">
+      <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="TokenizedType">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EnumeratedType">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="NotationType">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Enumeration">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="DefaultDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="conditionalSect">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="includeSect">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="ignoreSect">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="ignoreSectContents">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Ignore">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#String"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CharRef">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Reference">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EntityRef">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PEReference">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EntityDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="GEDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PEDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EntityDef">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PEDef">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="ExternalID">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="NDataDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="TextDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="extParsedEnt">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="extPE">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EncodingDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="EncName">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="NotationDecl">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="PublicID">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Seq"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Letter">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Alt"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="BaseChar">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Ideographic">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="CombiningChar">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Digit">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class>
+   <rdfs:Class rdf:ID="Extender">
+      <rdfs:subClassOf rdf:resource="http://www.openhealth.org/XSet#Char"/>
+   </rdfs:Class><!--define property for each production-->
+   <rdf:Property ID="_document">
+      <rdfs:range rdf:resource="#document"/>
+   </rdf:Property>
+   <rdf:Property ID="_characters">
+      <rdfs:range rdf:resource="#characters"/>
+   </rdf:Property>
+   <rdf:Property ID="_S">
+      <rdfs:range rdf:resource="#S"/>
+      <rdfs:domain rdf:resource="#PI"/>
+      <rdfs:domain rdf:resource="#XMLDecl"/>
+      <rdfs:domain rdf:resource="#VersionInfo"/>
+      <rdfs:domain rdf:resource="#Eq"/>
+      <rdfs:domain rdf:resource="#Misc"/>
+      <rdfs:domain rdf:resource="#doctypedecl"/>
+      <rdfs:domain rdf:resource="#extSubsetDecl"/>
+      <rdfs:domain rdf:resource="#SDDecl"/>
+      <rdfs:domain rdf:resource="#STag"/>
+      <rdfs:domain rdf:resource="#ETag"/>
+      <rdfs:domain rdf:resource="#EmptyElemTag"/>
+      <rdfs:domain rdf:resource="#elementdecl"/>
+      <rdfs:domain rdf:resource="#choice"/>
+      <rdfs:domain rdf:resource="#seq"/>
+      <rdfs:domain rdf:resource="#Mixed"/>
+      <rdfs:domain rdf:resource="#AttlistDecl"/>
+      <rdfs:domain rdf:resource="#AttDef"/>
+      <rdfs:domain rdf:resource="#NotationType"/>
+      <rdfs:domain rdf:resource="#Enumeration"/>
+      <rdfs:domain rdf:resource="#DefaultDecl"/>
+      <rdfs:domain rdf:resource="#includeSect"/>
+      <rdfs:domain rdf:resource="#ignoreSect"/>
+      <rdfs:domain rdf:resource="#GEDecl"/>
+      <rdfs:domain rdf:resource="#PEDecl"/>
+      <rdfs:domain rdf:resource="#ExternalID"/>
+      <rdfs:domain rdf:resource="#NDataDecl"/>
+      <rdfs:domain rdf:resource="#TextDecl"/>
+      <rdfs:domain rdf:resource="#EncodingDecl"/>
+      <rdfs:domain rdf:resource="#NotationDecl"/>
+      <rdfs:domain rdf:resource="#PublicID"/>
+   </rdf:Property>
+   <rdf:Property ID="_NameChar">
+      <rdfs:range rdf:resource="#NameChar"/>
+      <rdfs:domain rdf:resource="#Name"/>
+      <rdfs:domain rdf:resource="#Nmtoken"/>
+   </rdf:Property>
+   <rdf:Property ID="_Name">
+      <rdfs:range rdf:resource="#Name"/>
+      <rdfs:domain rdf:resource="#Names"/>
+      <rdfs:domain rdf:resource="#PITarget"/>
+      <rdfs:domain rdf:resource="#doctypedecl"/>
+      <rdfs:domain rdf:resource="#STag"/>
+      <rdfs:domain rdf:resource="#Attribute"/>
+      <rdfs:domain rdf:resource="#ETag"/>
+      <rdfs:domain rdf:resource="#EmptyElemTag"/>
+      <rdfs:domain rdf:resource="#elementdecl"/>
+      <rdfs:domain rdf:resource="#cp"/>
+      <rdfs:domain rdf:resource="#Mixed"/>
+      <rdfs:domain rdf:resource="#AttlistDecl"/>
+      <rdfs:domain rdf:resource="#AttDef"/>
+      <rdfs:domain rdf:resource="#NotationType"/>
+      <rdfs:domain rdf:resource="#EntityRef"/>
+      <rdfs:domain rdf:resource="#PEReference"/>
+      <rdfs:domain rdf:resource="#GEDecl"/>
+      <rdfs:domain rdf:resource="#PEDecl"/>
+      <rdfs:domain rdf:resource="#NDataDecl"/>
+      <rdfs:domain rdf:resource="#NotationDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_Names">
+      <rdfs:range rdf:resource="#Names"/>
+   </rdf:Property>
+   <rdf:Property ID="_Nmtoken">
+      <rdfs:range rdf:resource="#Nmtoken"/>
+      <rdfs:domain rdf:resource="#Nmtokens"/>
+      <rdfs:domain rdf:resource="#Enumeration"/>
+   </rdf:Property>
+   <rdf:Property ID="_Nmtokens">
+      <rdfs:range rdf:resource="#Nmtokens"/>
+   </rdf:Property>
+   <rdf:Property ID="_EntityValue">
+      <rdfs:range rdf:resource="#EntityValue"/>
+      <rdfs:domain rdf:resource="#EntityDef"/>
+      <rdfs:domain rdf:resource="#PEDef"/>
+   </rdf:Property>
+   <rdf:Property ID="_AttValue">
+      <rdfs:range rdf:resource="#AttValue"/>
+      <rdfs:domain rdf:resource="#Attribute"/>
+      <rdfs:domain rdf:resource="#DefaultDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_SystemLiteral">
+      <rdfs:range rdf:resource="#SystemLiteral"/>
+      <rdfs:domain rdf:resource="#ExternalID"/>
+   </rdf:Property>
+   <rdf:Property ID="_PubidLiteral">
+      <rdfs:range rdf:resource="#PubidLiteral"/>
+      <rdfs:domain rdf:resource="#ExternalID"/>
+      <rdfs:domain rdf:resource="#PublicID"/>
+   </rdf:Property>
+   <rdf:Property ID="_PubidChar">
+      <rdfs:range rdf:resource="#PubidChar"/>
+      <rdfs:domain rdf:resource="#PubidLiteral"/>
+   </rdf:Property>
+   <rdf:Property ID="_CharData">
+      <rdfs:range rdf:resource="#CharData"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_Comment">
+      <rdfs:range rdf:resource="#Comment"/>
+      <rdfs:domain rdf:resource="#Misc"/>
+      <rdfs:domain rdf:resource="#markupdecl"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_PI">
+      <rdfs:range rdf:resource="#PI"/>
+      <rdfs:domain rdf:resource="#Misc"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_PITarget">
+      <rdfs:range rdf:resource="#PITarget"/>
+      <rdfs:domain rdf:resource="#PI"/>
+   </rdf:Property>
+   <rdf:Property ID="_CDSect">
+      <rdfs:range rdf:resource="#CDSect"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_CDStart">
+      <rdfs:range rdf:resource="#CDStart"/>
+      <rdfs:domain rdf:resource="#CDSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_CData">
+      <rdfs:range rdf:resource="#CData"/>
+      <rdfs:domain rdf:resource="#CDSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_CDEnd">
+      <rdfs:range rdf:resource="#CDEnd"/>
+      <rdfs:domain rdf:resource="#CDSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_prolog">
+      <rdfs:range rdf:resource="#prolog"/>
+      <rdfs:domain rdf:resource="#document"/>
+   </rdf:Property>
+   <rdf:Property ID="_XMLDecl">
+      <rdfs:range rdf:resource="#XMLDecl"/>
+      <rdfs:domain rdf:resource="#prolog"/>
+   </rdf:Property>
+   <rdf:Property ID="_VersionInfo">
+      <rdfs:range rdf:resource="#VersionInfo"/>
+      <rdfs:domain rdf:resource="#XMLDecl"/>
+      <rdfs:domain rdf:resource="#TextDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_Eq">
+      <rdfs:range rdf:resource="#Eq"/>
+      <rdfs:domain rdf:resource="#VersionInfo"/>
+      <rdfs:domain rdf:resource="#SDDecl"/>
+      <rdfs:domain rdf:resource="#Attribute"/>
+      <rdfs:domain rdf:resource="#EncodingDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_VersionNum">
+      <rdfs:range rdf:resource="#VersionNum"/>
+      <rdfs:domain rdf:resource="#VersionInfo"/>
+   </rdf:Property>
+   <rdf:Property ID="_Misc">
+      <rdfs:range rdf:resource="#Misc"/>
+      <rdfs:domain rdf:resource="#document"/>
+      <rdfs:domain rdf:resource="#prolog"/>
+   </rdf:Property>
+   <rdf:Property ID="_doctypedecl">
+      <rdfs:range rdf:resource="#doctypedecl"/>
+      <rdfs:domain rdf:resource="#prolog"/>
+   </rdf:Property>
+   <rdf:Property ID="_markupdecl">
+      <rdfs:range rdf:resource="#markupdecl"/>
+      <rdfs:domain rdf:resource="#doctypedecl"/>
+      <rdfs:domain rdf:resource="#extSubsetDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_extSubset">
+      <rdfs:range rdf:resource="#extSubset"/>
+   </rdf:Property>
+   <rdf:Property ID="_extSubsetDecl">
+      <rdfs:range rdf:resource="#extSubsetDecl"/>
+      <rdfs:domain rdf:resource="#extSubset"/>
+      <rdfs:domain rdf:resource="#includeSect"/>
+      <rdfs:domain rdf:resource="#extPE"/>
+   </rdf:Property>
+   <rdf:Property ID="_SDDecl">
+      <rdfs:range rdf:resource="#SDDecl"/>
+      <rdfs:domain rdf:resource="#XMLDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_LanguageID">
+      <rdfs:range rdf:resource="#LanguageID"/>
+   </rdf:Property>
+   <rdf:Property ID="_Langcode">
+      <rdfs:range rdf:resource="#Langcode"/>
+      <rdfs:domain rdf:resource="#LanguageID"/>
+   </rdf:Property>
+   <rdf:Property ID="_ISO639Code">
+      <rdfs:range rdf:resource="#ISO639Code"/>
+      <rdfs:domain rdf:resource="#Langcode"/>
+   </rdf:Property>
+   <rdf:Property ID="_IanaCode">
+      <rdfs:range rdf:resource="#IanaCode"/>
+      <rdfs:domain rdf:resource="#Langcode"/>
+   </rdf:Property>
+   <rdf:Property ID="_UserCode">
+      <rdfs:range rdf:resource="#UserCode"/>
+      <rdfs:domain rdf:resource="#Langcode"/>
+   </rdf:Property>
+   <rdf:Property ID="_SubCode">
+      <rdfs:range rdf:resource="#SubCode"/>
+   </rdf:Property>
+   <rdf:Property ID="_element">
+      <rdfs:range rdf:resource="#element"/>
+      <rdfs:domain rdf:resource="#document"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_STag">
+      <rdfs:range rdf:resource="#STag"/>
+      <rdfs:domain rdf:resource="#element"/>
+   </rdf:Property>
+   <rdf:Property ID="_Attribute">
+      <rdfs:range rdf:resource="#Attribute"/>
+      <rdfs:domain rdf:resource="#STag"/>
+      <rdfs:domain rdf:resource="#EmptyElemTag"/>
+   </rdf:Property>
+   <rdf:Property ID="_ETag">
+      <rdfs:range rdf:resource="#ETag"/>
+      <rdfs:domain rdf:resource="#element"/>
+   </rdf:Property>
+   <rdf:Property ID="_content">
+      <rdfs:range rdf:resource="#content"/>
+      <rdfs:domain rdf:resource="#element"/>
+      <rdfs:domain rdf:resource="#extParsedEnt"/>
+   </rdf:Property>
+   <rdf:Property ID="_EmptyElemTag">
+      <rdfs:range rdf:resource="#EmptyElemTag"/>
+      <rdfs:domain rdf:resource="#element"/>
+   </rdf:Property>
+   <rdf:Property ID="_elementdecl">
+      <rdfs:range rdf:resource="#elementdecl"/>
+      <rdfs:domain rdf:resource="#markupdecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_contentspec">
+      <rdfs:range rdf:resource="#contentspec"/>
+      <rdfs:domain rdf:resource="#elementdecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_children">
+      <rdfs:range rdf:resource="#children"/>
+      <rdfs:domain rdf:resource="#contentspec"/>
+   </rdf:Property>
+   <rdf:Property ID="_cp">
+      <rdfs:range rdf:resource="#cp"/>
+      <rdfs:domain rdf:resource="#choice"/>
+      <rdfs:domain rdf:resource="#seq"/>
+   </rdf:Property>
+   <rdf:Property ID="_choice">
+      <rdfs:range rdf:resource="#choice"/>
+      <rdfs:domain rdf:resource="#children"/>
+      <rdfs:domain rdf:resource="#cp"/>
+   </rdf:Property>
+   <rdf:Property ID="_seq">
+      <rdfs:range rdf:resource="#seq"/>
+      <rdfs:domain rdf:resource="#children"/>
+      <rdfs:domain rdf:resource="#cp"/>
+   </rdf:Property>
+   <rdf:Property ID="_Mixed">
+      <rdfs:range rdf:resource="#Mixed"/>
+      <rdfs:domain rdf:resource="#contentspec"/>
+   </rdf:Property>
+   <rdf:Property ID="_AttlistDecl">
+      <rdfs:range rdf:resource="#AttlistDecl"/>
+      <rdfs:domain rdf:resource="#markupdecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_AttDef">
+      <rdfs:range rdf:resource="#AttDef"/>
+      <rdfs:domain rdf:resource="#AttlistDecl"/>
+   </rdf:Property>
+   <rdf:Property ID="_AttType">
+      <rdfs:range rdf:resource="#AttType"/>
+      <rdfs:domain rdf:resource="#AttDef"/>
+   </rdf:Property>
+   <rdf:Property ID="_StringType">
+      <rdfs:range rdf:resource="#StringType"/>
+      <rdfs:domain rdf:resource="#AttType"/>
+   </rdf:Property>
+   <rdf:Property ID="_TokenizedType">
+      <rdfs:range rdf:resource="#TokenizedType"/>
+      <rdfs:domain rdf:resource="#AttType"/>
+   </rdf:Property>
+   <rdf:Property ID="_EnumeratedType">
+      <rdfs:range rdf:resource="#EnumeratedType"/>
+      <rdfs:domain rdf:resource="#AttType"/>
+   </rdf:Property>
+   <rdf:Property ID="_NotationType">
+      <rdfs:range rdf:resource="#NotationType"/>
+      <rdfs:domain rdf:resource="#EnumeratedType"/>
+   </rdf:Property>
+   <rdf:Property ID="_Enumeration">
+      <rdfs:range rdf:resource="#Enumeration"/>
+      <rdfs:domain rdf:resource="#EnumeratedType"/>
+   </rdf:Property>
+   <rdf:Property ID="_DefaultDecl">
+      <rdfs:range rdf:resource="#DefaultDecl"/>
+      <rdfs:domain rdf:resource="#AttDef"/>
+   </rdf:Property>
+   <rdf:Property ID="_conditionalSect">
+      <rdfs:range rdf:resource="#conditionalSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_includeSect">
+      <rdfs:range rdf:resource="#includeSect"/>
+      <rdfs:domain rdf:resource="#conditionalSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_ignoreSect">
+      <rdfs:range rdf:resource="#ignoreSect"/>
+      <rdfs:domain rdf:resource="#conditionalSect"/>
+   </rdf:Property>
+   <rdf:Property ID="_ignoreSectContents">
+      <rdfs:range rdf:resource="#ignoreSectContents"/>
+      <rdfs:domain rdf:resource="#ignoreSect"/>
+      <rdfs:domain rdf:resource="#ignoreSectContents"/>
+   </rdf:Property>
+   <rdf:Property ID="_Ignore">
+      <rdfs:range rdf:resource="#Ignore"/>
+      <rdfs:domain rdf:resource="#ignoreSectContents"/>
+   </rdf:Property>
+   <rdf:Property ID="_CharRef">
+      <rdfs:range rdf:resource="#CharRef"/>
+      <rdfs:domain rdf:resource="#Reference"/>
+   </rdf:Property>
+   <rdf:Property ID="_Reference">
+      <rdfs:range rdf:resource="#Reference"/>
+      <rdfs:domain rdf:resource="#EntityValue"/>
+      <rdfs:domain rdf:resource="#AttValue"/>
+      <rdfs:domain rdf:resource="#content"/>
+   </rdf:Property>
+   <rdf:Property ID="_EntityRef">
+      <rdfs:range rdf:resource="#EntityRef"/>
+      <rdfs:domain rdf:resource="#Reference"/>
+   </rdf:Property>
+   <rdf:Property ID="_PEReference">
+      <rdfs:range rdf:resource="#PEReference"/>
+      <rdfs:domain rdf:resource="#EntityValue"/>
+      <rdfs:domain rdf:resource="#doctypedecl"/>
+      <rdfs:domain rdf:resource="#extSubsetDecl"/>
+   </rdf:Property>
+   <rdf:Pr

@@ -1,25 +1,23 @@
-print "1..2\n";
-
+$|=1;
+$N=shift || 1500;
 use DBMS;
+use Fcntl;
+no strict;
 
-tie %a,DBMS,'biggie' and print "ok\n" or die "could not connect $!";
+$a=tie %aap, 'DBMS','zappazoink',O_CREAT | O_RDWR 
+	or die "E= $DBMS::DBMS_ERROR $::DBMS_ERROR $! $@ $?";
 
-%a=();
-$last=$last_a='';
-for  $i( 1 .. 100 ) {
-	$a=  "Hello World part $i" x ( $i * $i );
+foreach $ci (1 .. 100) {
 
-	$a{ $i } = $a
-		or die "errow hile setting: $!";
+	for $i (1 .. $N) {
+		$aap{ $i } = $i;# print "FAIL $::DBMS_ERROR";
+		};
 
-	die "Nope not the same"
-		if defined($a{$last}) && ($a{ $last } ne $last_a) ;
+	for $i (1 .. $N) {
+		($c=$aap{ $i }) == $i || print "\nVal Fault\n";
+		print "\nFAIL $::DBMS_ERROR $!\n" unless defined $c;
+		};
+print".";
+	};
 
-	$last_a = $a;
-	$last  = $i;
-	}
-
-%a=();
-untie %a;
-
-print "ok\n";
+untie %aap;

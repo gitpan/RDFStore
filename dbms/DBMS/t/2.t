@@ -1,25 +1,22 @@
-print "1..2\n";
-
+$|=1;
+$N=shift || 500;
 use DBMS;
+use Fcntl;
+no strict;
 
-tie %a,DBMS,'biggie' and print "ok\n" or die "could not connect $!";
+foreach $ci (1 .. 4) {
+	$a=tie %aap, 'DBMS','zappazoink',O_CREAT | O_RDWR 
+		or die "E= $DBMS::DBMS_ERROR $::DBMS_ERROR $! $@ $?";
 
-%a=();
-$last_a=$last='';
-for $i ( 1 .. 100 ) {
-	$a=  '.' x ( $i * 1024 );
+	for $i (1 .. $N) {
+		$aap{ $i } = $i;# print "FAIL $::DBMS_ERROR";
+		};
 
-	$a{ $i } = $a
-		or die "Storing failed: $!";
+	for $i (1 .. $N) {
+		($c=$aap{ $i }) == $i || print "\nVal Fault\n";
+		print "\nFAIL $::DBMS_ERROR $!\n" unless defined $c;
+		};
 
-	die "Retrieval failed"
-		if defined($a{ $last}) && ($a{ $last } ne $last_a) ;
-
-	$last_a = $a;
-	$last  = $i;
-	}
-%a=();
-untie %a;
-
-print "ok\n";
-
+	untie %aap;
+	# print "[$$]";
+	};

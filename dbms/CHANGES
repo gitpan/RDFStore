@@ -1,0 +1,63 @@
+Revision history for Perl extension RDFStore.
+
+version 1.1.1.1 2001/01/18 09:53:20
+-------------------------------------------------------------------------------------------
+
+	A a new version of dbmsd has been made. Most of this code come from one of the
+	leatest version authored by Dirk Willem-van Gulik early 1999. Since version 0.1
+	I simpy posted his code almost untouched, but due the fact dirk left since a year
+	ago I will take over the dbmsd project. I am not a C guru and volunteers are
+	welcome. What is new:
+
+		- dirk started with multi-thread supported but it was never finished that
+		  I know of
+		- some bug fixing to get it compiled on Irix and Solaris has been made
+		- dbmsd still use BerkeleyDB 1.x style interface
+
+	Now DBMS runs fine on Linux platforms (tested on SuSE Linux Linux 2.2.16) by using the
+	Sleepycat BDB 1.85 compatibility API (namely libdb1 and db_185.h). The user needs to edit
+	the deamon/Makefile to link with the right library.
+
+	DBMS/typemap
+		- Fixed bug to make it compile on old and recent Perl5 versions
+
+	Makefile
+		- general update. Added make depend for deamon
+
+	deamon/children.c
+		- added platform check to include compatibility code db_185.h
+
+	deamon/deamon.c
+		- added platform check to include compatibility code db_185.h
+
+	deamon/deamon.h
+		- added platform check to include compatibility code db_185.h
+
+	deamon/handler.c
+		- added platform check to include compatibility code db_185.h
+
+	deamon/loop.c
+		- added platform check to include compatibility code db_185.h
+
+	deamon/main.c
+		- added platform check to include compatibility code db_185.h
+
+	deamon/Makefile
+		- commented out a few options and cleaned up a few things
+		- added (optional) libdb1 to get DBMS compile on Linux
+
+	deamon/README
+		- included README file originally written by dirk
+	
+	utils
+		- moved original utils/dbcat_raw utils to dbsm dirs
+
+	doc
+		- added documentation section
+		- added dbms.html contribution by dirkx@webweaving.org
+	
+	INSTALL
+		- added installation instructions
+
+	deamon/handler.c
+		- commented out sys/syslimits.h (already included by sys/param.h)

@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 # * Changes:
@@ -48,13 +47,24 @@
 # *		- fixed bug in processTypedNode() when remove attributes
 # *		- commented off croak in expandAttributes() when 'expanding predicate element' for 
 # *		  production http://www.w3.org/TR/REC-rdf-syntax/#typedNode for xhtml2rdf stuff
+# *     version 0.4
+# *		- changed way to return undef in subroutines
+# *		- now creation of Bag instances for each Description block is an option
+# *		- fixed a few warnings
+# *		- fixed bug in getAttributeValue() when check attribute name
+# *		- fixed bug in setSource() when add trailing '#' char
+# *		- added bug fixing in RDFXML_StartElementHandler(), newReificationID() and processPredicate() by rob@eorbit.net
+# *		- fixed warnings in getAttributeValue(), RDFXML_StartElementHandler()
+# *		- added GenidNumber parameter
+# *		- updated accordingly to http://www.w3.org/RDF/Implementations/SiRPAC/
+# *		- bug fix in reify() when generate the subject property triple
+# *		- added getReificationCounter()
 # *
 
 package RDFStore::Parser::SiRPAC;
 {
+	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
 	use strict;
-
-	use vars qw($VERSION %Built_In_Styles);
 	use Carp qw(carp croak cluck confess);
 	use URI;
 	use URI::Escape;
@@ -71,7 +81,6 @@ BEGIN
 $RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS="http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 $RDFStore::Parser::SiRPAC::RDF_SCHEMA_NS="http://www.w3.org/TR/1999/PR-rdf-schema-19990303#";
 $RDFStore::Parser::SiRPAC::RDFX_NS="http://interdataworking.com/vocabulary/order-20000527#";
-$RDFStore::Parser::SiRPAC::ENABLE_EXPERIMENTAL=1;
 $RDFStore::Parser::SiRPAC::XMLSCHEMA="xml";
 $RDFStore::Parser::SiRPAC::XML_space=$RDFStore::Parser::SiRPAC::XMLSCHEMA."space";
 $RDFStore::Parser::SiRPAC::XML_space_preserve="preserve";
@@ -156,8 +165,7 @@ sub new {
     	bless \%args, $class;
 }
 
-sub setHandlers
-{
+sub setHandlers {
 	my ($class, @handler_pairs) = @_;
 
 	croak("Uneven number of arguments to setHandlers method") 
@@ -179,15 +187,15 @@ sub setHandlers
 sub setSource {
   	my ($file_or_uri)=@_;
 
-	return undef
+	return
 		unless(defined $file_or_uri);
 
-	$file_or_uri .= '#'
-		if(	(defined $file_or_uri) &&
-			(!($file_or_uri =~ /#$/)) ||
-			($file_or_uri =~ /\/$/) ||
-			($file_or_uri =~ /:$/)
-			);
+	if(defined $file_or_uri) {
+		$file_or_uri .= '#'
+			unless(	($file_or_uri =~ /#$/) ||
+				($file_or_uri =~ /\/$/) ||
+				($file_or_uri =~ /:$/) );
+	};
 	return $file_or_uri;
 };
 
@@ -217,7 +225,8 @@ sub parse_start {
   	$firstnb->{SiRPAC}->{elementStack} = [];
   	$firstnb->{SiRPAC}->{root}='';
   	$firstnb->{SiRPAC}->{EXPECT_Element}='';
-  	$firstnb->{SiRPAC}->{iReificationCounter}=0;
+  	$firstnb->{SiRPAC}->{iReificationCounter}= ( ($class->{GenidNumber}) && (int($class->{GenidNumber})) ) ? $class->{GenidNumber} : 0;
+	$class->{iReificationCounter} = \$firstnb->{SiRPAC}->{iReificationCounter};
 	if(	(exists $class->{Source}) && 
 			(defined $class->{Source}) &&
 			( (!(ref($class->{Source}))) || (!($class->{Source}->isa("URI"))) )	) {
@@ -254,7 +263,7 @@ sub parse_start {
 	# createBags method allows one to determine whether SiRPAC
 	# produces Bag instances for each Description block.
 	# The default setting is to generate them. - to be checked......
-  	$firstnb->{SiRPAC}->{bCreateBags}=0;
+  	$firstnb->{SiRPAC}->{bCreateBags}=( ($class->{bCreateBags}) && (int($class->{bCreateBags})) ) ? $class->{bCreateBags} : 0;
 	#
 	# Set whether parser recursively fetches and parses
 	# every RDF schema it finds in the namespace declarations
@@ -289,8 +298,17 @@ sub parse_start {
 
 	$firstnb->{parser_parameters} = \@parser_parameters;
 
-	$firstnb->{FinalHandler} = $final
-		if defined($final);
+	#if(defined($final)) {
+	#	$firstnb->{FinalHandler} = sub {
+	#		my $r= &$final($_[0]);
+	#		$_[0]->release;
+	#		return $r;
+	#	};
+	#} else {
+	#	$firstnb->{FinalHandler} = sub {
+	#		#$_[0]->release;
+	#	};
+	#};
 
 	return $firstnb;
 };
@@ -322,7 +340,8 @@ sub parse {
   	$first->{SiRPAC}->{elementStack} = [];
   	$first->{SiRPAC}->{root}='';
   	$first->{SiRPAC}->{EXPECT_Element}='';
-  	$first->{SiRPAC}->{iReificationCounter}=0;
+  	$first->{SiRPAC}->{iReificationCounter}= ( ($class->{GenidNumber}) && (int($class->{GenidNumber})) ) ? $class->{GenidNumber} : 0;
+	$class->{iReificationCounter} = \$first->{SiRPAC}->{iReificationCounter};
 	if(	(exists $class->{Source}) && 
 			(defined $class->{Source}) &&
 			( (!(ref($class->{Source}))) || (!($class->{Source}->isa("URI"))) )	) {
@@ -355,7 +374,7 @@ sub parse {
 	# createBags method allows one to determine whether SiRPAC
 	# produces Bag instances for each Description block.
 	# The default setting is to generate them. - to be checked......
-  	$first->{SiRPAC}->{bCreateBags}=0;
+  	$first->{SiRPAC}->{bCreateBags}=( ($class->{bCreateBags}) && (int($class->{bCreateBags})) ) ? $class->{bCreateBags} : 0;
 	#
 	# Set whether parser recursively fetches and parses
 	# every RDF schema it finds in the namespace declarations
@@ -411,6 +430,10 @@ sub parse {
 
 	return unless defined wantarray;
 	return wantarray ? @result : $result;
+};
+
+sub getReificationCounter {
+	return ${$_[0]->{iReificationCounter}};
 };
 
 sub parsestring {
@@ -503,14 +526,14 @@ sub wget {
         if (!($line =~ m#^HTTP/(\d+)\.(\d+) (\d\d\d) (.+)$#)) {
 		close(S);
                 warn "Did not get HTTP/X.X header back...$line";
-                return undef;
+                return;
         };
         my $status = $3;
         my $reason = $4;
 	if ( ($status != 200) && ($status != 302) ) {
 		close(S);
                 warn "Error MSG returned from server: $status $reason\n";
-                return undef;
+                return;
         };
         while(<S>) {
         	chomp;
@@ -532,16 +555,26 @@ sub wget {
 sub getAttributeValue {
 	my ($expat,$attlist, $elName) = @_;
 
-  	return undef
-		if(!@{$attlist});
+#print STDERR "getAttributeValue(@_): ".(caller)[2]."\n";
+
+  	return
+		if( (ref($attlist) =~ /ARRAY/) && (!@{$attlist}) );
 
 	my $n;
 	for($n=0; $n<=$#{$attlist}; $n+=2) {
-    		my $attname = $attlist->[$n]->[0].$attlist->[$n]->[1];
+    		my $attname;
+		if(ref($attlist->[$n]) =~ /ARRAY/) {
+    			#$attname = $attlist->[$n]->[0].$attlist->[$n]->[1];
+    			$attname = $attlist->[$n]->[0];
+    			$attname .= $attlist->[$n]->[1]
+				if(defined $attlist->[$n]->[1]);
+		} else {
+			$attname = $attlist->[$n];
+		};
     		return $attlist->[$n+1]
 			if ($attname eq $elName);
   	};
-  	return undef;
+  	return;
 }
 
 sub RDFXML_StartElementHandler {
@@ -553,6 +586,7 @@ sub RDFXML_StartElementHandler {
 
 	# Stack up the vNStodo namespace list - we could do it with map()
 	my $sNamespace = $expat->namespace($tag);
+
 	if(not(defined $sNamespace)) {			
 		my ($prefix,$suffix) = split(':',$tag);
 		if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA) {
@@ -564,7 +598,11 @@ sub RDFXML_StartElementHandler {
 		};
         };
 	push @{$expat->{SiRPAC}->{vNStodo}},$sNamespace
-		unless( (grep /$sNamespace/,@{$expat->{SiRPAC}->{vNStodo}}) &&
+		unless( (defined $sNamespace) &&
+			($sNamespace ne '') &&
+			($#{$expat->{SiRPAC}->{vNStodo}}>=0) &&
+			($#{$expat->{SiRPAC}->{vNSdone}}>=0) &&
+			(grep /$sNamespace/,@{$expat->{SiRPAC}->{vNStodo}}) &&
 			(grep /$sNamespace/,@{$expat->{SiRPAC}->{vNSdone}}) );
 
 	my $newElement;
@@ -590,7 +628,8 @@ sub RDFXML_StartElementHandler {
 		for($n=0; $n<=$#attlist; $n+=2) {
     			my $attname = $attlist[$n];
 			my $namespace = $expat->namespace($attname);
-			unless(defined $namespace) { #default namespace
+			unless(	(defined $namespace) &&
+				($namespace ne '') ) { #default namespace
 				my ($prefix,$suffix) = split(':',$attname);
 				if( (defined $prefix) && (defined $suffix) ) {
 					if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA) {
@@ -600,14 +639,15 @@ sub RDFXML_StartElementHandler {
 						$expat->xpcroak("Unresolved namespace prefix '$prefix' for '$suffix'");
 					};
 				} else {
-					if(	($attname eq 'resource') 	|| 
-						($attname eq 'ID') 		|| 
-						($attname eq 'about') 		|| 
-						($attname eq 'aboutEach') 	|| 
-						($attname eq 'aboutEachPrefix') ||
-						($attname eq 'bagID')		||
-						($attname eq 'parseType')	||
-						($attname eq 'type') ) {
+					if(	($sNamespace eq $RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS)	&&
+						(	($attname eq 'resource') 	|| 
+							($attname eq 'ID') 		|| 
+							($attname eq 'about') 		|| 
+							($attname eq 'aboutEach') 	|| 
+							($attname eq 'aboutEachPrefix') ||
+							($attname eq 'bagID')		||
+							($attname eq 'parseType')	||
+							($attname eq 'type') ) ) {
 						#default to RDFMS
 						$namespace = $RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS;
 					} else {
@@ -619,7 +659,11 @@ sub RDFXML_StartElementHandler {
 				$attlist[$n]=[$namespace,$attname];
 			};
 			push @{$expat->{SiRPAC}->{vNStodo}}, $namespace
-				unless( (grep /$namespace/,@{$expat->{SiRPAC}->{vNStodo}}) &&
+				unless( (defined $namespace) &&
+					($namespace ne '') &&
+					($#{$expat->{SiRPAC}->{vNStodo}}>=0) &&
+                        		($#{$expat->{SiRPAC}->{vNSdone}}>=0) &&
+					(grep /$namespace/,@{$expat->{SiRPAC}->{vNStodo}}) &&
 					(grep /$namespace/,@{$expat->{SiRPAC}->{vNSdone}}) );
   		};
 	};
@@ -655,16 +699,19 @@ sub RDFXML_StartElementHandler {
 
         	my $sAboutEach = getAttributeValue($expat,$newElement->{attlist},
 				$RDFStore::Parser::SiRPAC::RDFMS_aboutEach);
+                $sAboutEach = "" if not defined $sAboutEach;
         	$newElement->{sAboutEach} = $sAboutEach
 			if ($sAboutEach =~ /^#/);
 
         	my $sAboutEachPrefix = getAttributeValue($expat,$newElement->{attlist},
 				$RDFStore::Parser::SiRPAC::RDFMS_aboutEachPrefix);
+                $sAboutEachPrefix = "" if not defined $sAboutEachPrefix;
         	$newElement->{sAboutEachPrefix} = $sAboutEachPrefix
 			if ($sAboutEachPrefix =~ /^#/);
 
         	my $sAbout = getAttributeValue($expat,$newElement->{attlist},
 				$RDFStore::Parser::SiRPAC::RDFMS_about);
+                $sAbout = "" if not defined $sAbout;
         	if($sAbout) {
         		$newElement->{sAbout} = makeAbsolute($expat,$sAbout);
         	};
@@ -672,6 +719,7 @@ sub RDFXML_StartElementHandler {
         	my $sBagID = getAttributeValue($expat,$newElement->{attlist},
 				$RDFStore::Parser::SiRPAC::RDFMS_bagID);
 
+                $sBagID = "" if not defined $sBagID;
         	if ($sBagID) {
         		$newElement->{sBagID} = makeAbsolute($expat,$sBagID);
 			$sBagID = $newElement->{sBagID};
@@ -679,6 +727,7 @@ sub RDFXML_StartElementHandler {
 
         	my $sID = getAttributeValue($expat,$newElement->{attlist},
 				$RDFStore::Parser::SiRPAC::RDFMS_ID);
+                $sID = "" if not defined $sID;
         	if ($sID) {
         		$newElement->{sID} = makeAbsolute($expat,$sID);
 			$sID = $newElement->{sID};
@@ -818,8 +867,8 @@ sub RDFXML_EndElementHandler {
 sub RDFXML_CharacterDataHandler {
 	my $expat = shift;
 	my $text = shift;
-
-	if (parseLiteral($expat)) {
+   
+	if(parseLiteral($expat)) {
 		#Trigger 'Char_Literal' event
 		my $char_literal = $expat->{SiRPAC}->{parser}->{Handlers}->{Char_Literal}
 			if(ref($expat->{SiRPAC}->{parser}->{Handlers}) =~ /HASH/);
@@ -1023,7 +1072,11 @@ sub processXML {
 			# in the $first pass streaming the first trigger is on "Description"
 			processXML($third->{SiRPAC}->{root});
 
-			$third->release;
+			#if($expat->isa("XML::Parser::ExpatNB")) {
+                	#	$third->{FinalHandler} = sub {
+			#		$_[0]->release;
+                	#	};
+			#};
       		};
     	};
 };
@@ -1153,7 +1206,7 @@ sub processDescription {
                 		processDescription($expat,$newNode,1,0,0);
         		};
 	 	};
-      		return undef;
+      		return;
     	};
 
 	# Manage the aboutEachPrefix attribute
@@ -1172,7 +1225,7 @@ sub processDescription {
                 		processDescription($expat,$newDescription,0,0,0);
         		};
       		};
-      		return undef;
+      		return;
     	};
 
 	# Enumerate through the children
@@ -1182,7 +1235,8 @@ sub processDescription {
 		if($n->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Description) {
         		$expat->xpcroak("Cannot nest a Description inside another Description");
       		} elsif( 	($n->name() =~ /^$RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS/) &&
-					( ($n->localName() =~ /li$/) || ($n->localName() =~ /_/) ) ) {
+				( ($n->localName() =~ /li$/) || ($n->localName() =~ /_/) ) &&
+				(defined $sID) && ($sID ne '') ) {
         		processListItem($expat,$sID,$n,$paCounter);
         		$paCounter++;
       		} elsif( 	($n->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Seq) ||
@@ -1259,7 +1313,10 @@ sub processDescription {
             				$iChildCount++;
           			};
         		};
-      		};
+      		} else {
+			# n is a propAttr
+          		processPredicate($expat,$n,$ele,$sAbout,0);
+		};
     	};
 	$ele->{bDone} = 1;
 	
@@ -1271,7 +1328,7 @@ sub processDescription {
 sub addTriple {
 	my ($expat,$predicate,$subject,$object) = @_;
 
-#print STDERR "addTriple('$predicate','$subject','$object')",((caller)[2]),"\n";
+#print STDERR "addTriple('".$predicate->toString."','".$subject->toString."','".$object->toString."')",((caller)[2]),"\n";
 
 	# If there is no subject (about=""), then use the URI/filename where
 	# the RDF description came from
@@ -1294,7 +1351,7 @@ sub addTriple {
         	return &$assert($expat, 
 				$expat->{SiRPAC}->{nodeFactory}->createStatement($subject,$predicate,$object) );
 	} else {
-		return undef;
+		return;
 	};
 };
 
@@ -1307,7 +1364,7 @@ sub newReificationID {
 	if( (defined $expat->{SiRPAC}->{sSource}) && ($expat->{SiRPAC}->{sSource} ne '') ) {
 		$reifStr=makeAbsolute($expat,"genid".$expat->{SiRPAC}->{iReificationCounter});
 	} else {
-		$reifStr="genid".$expat->{SiRPAC}->{iReificationCounter};
+		$reifStr="#genid".$expat->{SiRPAC}->{iReificationCounter};
 	};
 	return $reifStr;
 };
@@ -1401,7 +1458,7 @@ sub processTypedNode {
 			);
     	};
 
-    	my $sDesc = processDescription($expat,$typedNode, 0, 0, 0);
+    	my $sDesc = processDescription($expat,$typedNode, 0, $expat->{SiRPAC}->{bCreateBags}, 0);
 
     	return $sObject;
 };
@@ -1468,14 +1525,9 @@ sub processListItem {
      	# 2. LI element with content (resource unavailable)
 
 	my $sResource = $listitem->{sResource};
-
-	# SM: bug fix 2000-10-30
-	my $ord = 	($listitem->name() =~ /li$/) ?
-				$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter) :
-				$expat->{SiRPAC}->{nodeFactory}->createResource($listitem->namespace,$listitem->localName);
     	if((defined $sResource) && ($sResource ne '')) {
 		addTriple(	$expat,
-				$ord,
+				$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter),
                        		$expat->{SiRPAC}->{nodeFactory}->createResource($sID),
 				$expat->{SiRPAC}->{nodeFactory}->createResource($sResource)
 			 );
@@ -1489,14 +1541,14 @@ sub processListItem {
 		foreach $n (@{$listitem->{children}}) {
         		if($n->isa('RDFStore::Parser::SiRPAC::DataElement')) { #isData?
 				addTriple(	$expat,
-						$ord,
+						$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter),
                        				$expat->{SiRPAC}->{nodeFactory}->createResource($sID),
 						$expat->{SiRPAC}->{nodeFactory}->createLiteral($n->{sContent})
 					 ); #here is Literal - how to handle it???
         		} elsif($n->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Description) {
           			my $sNodeID = processDescription($expat,$n, 0,1, 0);
 				addTriple(	$expat,
-						$ord,
+						$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter),
                        				$expat->{SiRPAC}->{nodeFactory}->createResource($sID),
 						$expat->{SiRPAC}->{nodeFactory}->createResource($sNodeID)
 					) ;
@@ -1510,7 +1562,7 @@ sub processListItem {
                                 	($n->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Bag) ) {
 				processContainer($n);
 				addTriple(	$expat,
-						$ord,
+						 $expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter),
                        				$expat->{SiRPAC}->{nodeFactory}->createResource($sID),
 						$expat->{SiRPAC}->{nodeFactory}->createResource($n->{sID})
 					);
@@ -1518,7 +1570,7 @@ sub processListItem {
 					(length($n->name())>0) ) {
 				my $sNodeID = processTypedNode($expat,$n);
 				addTriple(	$expat,
-						$ord,
+						$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS."_".$iCounter),
                        				$expat->{SiRPAC}->{nodeFactory}->createResource($sID),
 						$expat->{SiRPAC}->{nodeFactory}->createResource($sNodeID)
 					);
@@ -1544,12 +1596,12 @@ sub processPredicate {
 
 	# this new element may not be needed
         my $d = RDFStore::Parser::SiRPAC::Element->new(undef,$RDFStore::Parser::SiRPAC::RDFMS_Description);
-    	if (expandAttributes($expat,$d,$predicate,1)) {
+    	if(expandAttributes($expat,$d,$predicate,1,$sResource)) {
       		# error checking
       		if(scalar(@{$predicate->{children}})>0) {
         		$expat->xpcroak($predicate->name()." must be an empty element since it uses propAttr grammar production - see <a href=\"http://www.w3.org/TR/REC-rdf-syntax/#propertyElt\">[6.12]</a>");
         		#cluck($predicate->name()." must be an empty element since it uses propAttr grammar production - see <a href=\"http://www.w3.org/TR/REC-rdf-syntax/#propertyElt\">[6.12]</a>");
-        		return undef;
+        		return;
       		};
 
       		# determine the 'about' part for the new statements
@@ -1592,12 +1644,11 @@ sub processPredicate {
 							$predicate->{sID});
 				$predicate->{sID} = makeAbsolute($expat,$sStatementID);
         		} else {
-          			addOrder( 	$expat,
-						$predicate, 0, undef,
+				addTriple(	$expat,
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($sResource)
-					);
+					 );
         		};
       		} else {
         		if ($reify) {
@@ -1608,8 +1659,7 @@ sub processPredicate {
 							$predicate->{sID});
 				$predicate->{sID} = makeAbsolute($expat,$sStatementID);
         		} else {
-          			addOrder( 	$expat,
-						$predicate, 0, undef,
+          			addTriple( 	$expat,
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($predicate_target->{sID})
@@ -1631,8 +1681,7 @@ sub processPredicate {
 						$predicate->{sID});
 			$predicate->{sID} = makeAbsolute($expat,$sStatementID);
         	} else {
-          		addOrder( 	$expat,
-					$predicate, 0, undef,
+          		addTriple( 	$expat,
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sStatementID)
@@ -1643,7 +1692,7 @@ sub processPredicate {
 
 	# Before looping through the children, let's check
 	# if there are any. If not, the value of the predicate is an anonymous node
-    	my $sObject = newReificationID($expat);
+    	my $sObject = ( (exists $d->{sID}) && (defined $d->{sID}) ) ? $d->{sID} : newReificationID($expat);
 	if (scalar(@{$predicate->{children}})<=0) {
         	if ($reify) {
           		$sStatementID = reify(	$expat, 
@@ -1652,22 +1701,20 @@ sub processPredicate {
 						$expat->{SiRPAC}->{nodeFactory}->createResource($sObject),
 						$predicate->{sID});
         	} else {
-          		addOrder( 	$expat,
-					$predicate, 0, undef,
+          		addTriple( 	$expat,
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sObject)
 				 );
 		};
 	};
-	my $previousStatement;
 	my $order = 0;
 	my $n2;
 	foreach $n2 (@{$predicate->{children}}) {
       		# FIXME: we are not requiring this for the sake of experiment
 		# $expat->xpcroak("Only one node allowed inside a predicate (Extra node is ". $n2->name() .") - see <a href=\"http://www.w3.org/TR/REC-rdf-syntax/#propertyElt\">[6.12]</a>");
 
-		if ($n2->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Description) {
+		if (defined $n2->name() && $n2->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Description) {
         		my $d2 = $n2;
         		$sStatementID = processDescription ($expat,$d2, 1,0,0);
         		$d2->{sID} = makeAbsolute($expat,$sStatementID);
@@ -1678,8 +1725,7 @@ sub processPredicate {
 						$expat->{SiRPAC}->{nodeFactory}->createResource($sStatementID),
 						$predicate->{sID});
         		} else {
-          			addOrder( 	$expat,
-						$predicate, ++$order, $previousStatement,
+          			addTriple( 	$expat,
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      				$expat->{SiRPAC}->{nodeFactory}->createResource($sStatementID)
@@ -1689,8 +1735,19 @@ sub processPredicate {
 			# We've got real data
         		my $sValue = $n2->{sContent};
 
+			# If this predicate has an rdf:resource propAttr defined,
+			# it should be the target [subject] of the triple
+           		$sTarget = $predicate->{sResource}
+				if (	(exists $predicate->{sResource}) &&
+					(defined $predicate->{sResource}) &&
+					($predicate->{sResource} ne '') );
+
                         # Only if the content is not empty PCDATA (whitespace that is), print the triple
-        		if ($reify) {
+			# NOTE: If predicate has an ID, the spec says it should be reified.
+        		if(	($reify) ||
+				(	(exists $predicate->{sID}) &&
+					(defined $predicate->{sID}) &&
+					($predicate->{sID} ne '') ) ) {
           			$sStatementID = reify(	$expat, 
 						$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
 						$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
@@ -1698,13 +1755,11 @@ sub processPredicate {
 						$predicate->{sID}); #ignore isXML
 				$predicate->{sID} = makeAbsolute($expat,$sStatementID);
         		} else {
-          			$previousStatement = addOrder ( 	$expat,
-									$predicate, ++$order, 
-									$previousStatement,
-                     							$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
-                     							$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
-									$expat->{SiRPAC}->{nodeFactory}->createLiteral($sValue)
-								); #ignore isXML
+          			addTriple ( 	$expat,
+                     				$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
+                     				$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
+						$expat->{SiRPAC}->{nodeFactory}->createLiteral($sValue)
+						); #ignore isXML
         		};
       		} elsif( 	($n2->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Seq) ||
                             	($n2->name() eq $RDFStore::Parser::SiRPAC::RDFMS_Alt) ||
@@ -1749,8 +1804,7 @@ sub processPredicate {
       		} elsif( 	(!($n2->name() eq $RDFStore::Parser::SiRPAC::RDFMS_resource)) && 
 				(length($n2->name())>0) ) {
         		$sStatementID = processTypedNode($expat,$n2);
-          		$previousStatement = addOrder ( 	$expat,
-					$predicate, ++$order, $previousStatement,
+          		addTriple ( 	$expat,
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($predicate->namespace,$predicate->localName),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sTarget),
                      			$expat->{SiRPAC}->{nodeFactory}->createResource($sStatementID)
@@ -1766,6 +1820,8 @@ sub reify {
 	$sNodeID = newReificationID($expat)
     		if(not(((defined $sNodeID) && ($sNodeID ne ''))));
 
+#print STDERR "reify('".$predicate->toString."','".$subject->toString."','".$object->toString."','$sNodeID')",((caller)[2]),"\n";
+
      	# The original statement must remain in the data model
     	addTriple($expat,$predicate, $subject, $object);
 
@@ -1774,7 +1830,7 @@ sub reify {
     		($predicate eq $RDFStore::Parser::SiRPAC::RDFMS_predicate) ||
     		($predicate eq $RDFStore::Parser::SiRPAC::RDFMS_object) ||
     		($predicate eq $RDFStore::Parser::SiRPAC::RDFMS_type) ) {
-      		return undef;
+      		return;
     	};
 
 	# Reify by creating 4 new triples
@@ -1787,7 +1843,8 @@ sub reify {
     	addTriple(	$expat,
 			$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS,'subject'),
 			$expat->{SiRPAC}->{nodeFactory}->createResource($sNodeID),	
-			$expat->{SiRPAC}->{nodeFactory}->createLiteral($subject)
+			#bug fix by AR 2001/06/10
+			$expat->{SiRPAC}->{nodeFactory}->createResource($subject)
 			);
 
     	addTriple(	$expat,
@@ -1804,73 +1861,20 @@ sub reify {
 	return $sNodeID;
 };
 
-# check for rdf:order and rdf:backwardOrder
-# orderInt == 1 is ignored, it is added on the second call with previousStatement (orderInt == 2)
-# orderInt < 1 is completely ignored 
-sub addOrder {
-	my ($expat,$predicate,$orderInt,$previousStatement,$p,$s,$o) = @_;
-
-#print STDERR "addOrder('",$p->getLabel,"','",$s->getLabel,"','",$o->getLabel,"')",((caller)[2]),"\n";
-
-	return undef
-		if(!($RDFStore::Parser::SiRPAC::ENABLE_EXPERIMENTAL));
-
-	if($orderInt == 2) {
-      		# add order of the previous statement if any
-		addTriple(	$expat,
-				$previousStatement,
-				$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDFX_NS,"order"),
-				$expat->{SiRPAC}->{nodeFactory}->createLiteral("1")
-			);
-    	};
-
-	# "createStatement" must be handled within the callback :-)
-    	my $st = $expat->{SiRPAC}->{nodeFactory}->createStatement($s,$p,$o);
-	addTriple($expat,$p,$s,$o);
-
-	my $order = getAttributeValue(	$expat, $predicate->{attlist},
-					$RDFStore::Parser::SiRPAC::RDFX_NS."order");
-	my $backwardOrder = getAttributeValue(	$expat, $predicate->{attlist},
-					$RDFStore::Parser::SiRPAC::RDFX_NS."backwardOrder");
-
-    	if( (defined $previousStatement) && (defined $order) ) {
-		# two statements cannot have the same forward order
-      		$expat->xpcroak("two statements " . $previousStatement ." and " . $st . " cannot have the same forward order");
-    	};
-
-      	$order = $orderInt
-    		if( (not(defined $order)) && ($orderInt > 1) );
-    	if(defined $order) {
-		addTriple(	$expat,
-				$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDFX_NS,"order"),
-				$st,
-				$expat->{SiRPAC}->{nodeFactory}->createLiteral($order)
-			);
-    	};
-    	if(defined $backwardOrder) {
-		addTriple(	$expat,
-				$expat->{SiRPAC}->{nodeFactory}->createResource($RDFStore::Parser::SiRPAC::RDFX_NS,"backwardOrder"),
-				$st,
-				$expat->{SiRPAC}->{nodeFactory}->createLiteral($backwardOrder)
-			);
-    	};
-
-	return $st;
-};
-
 # Take an element <i>ele</i> with its parent element <i>parent</i>
 # and evaluate all its attributes to see if they are non-RDF specific
 # and non-XML specific in which case they must become children of
 # the <i>ele</i> node.
 sub expandAttributes {
-	my ($expat,$parent,$ele,$predicateNode) = @_;
+	my ($expat,$parent,$ele,$predicateNode,$resourceValue) = @_;
 
 #print "expandAttributes($parent,$ele->name(),$predicateNode)",((caller)[2]),"\n";
 
 	my $foundAbbreviation = 0;
+	my $resourceFound = 0;
 	
   	my $count=0;
-  	while ($count<=$#{$ele->{attlist}}) {
+	while ($count<=$#{$ele->{attlist}}) {
     		my $sAttribute = $ele->{attlist}->[$count++]->[0].$ele->{attlist}->[$count-1]->[1];
     		my $sValue = getAttributeValue($expat, $ele->{attlist},$sAttribute);
 		$count++;
@@ -1883,17 +1887,30 @@ sub expandAttributes {
 
       		# exception: expand rdf:value
       		if (	($sAttribute =~ /^$RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS/) &&
-          		(!($ele->{attlist}->[$count-2]->[0]=~ /^_/)) && #this might be buggy by AR 2000/11/14
-          		(!($ele->{attlist}->[$count-2]->[0] =~ /value$/)) &&
-          		(!($ele->{attlist}->[$count-2]->[0] =~ /type$/)) ) {
-        		next;
+          		(!($ele->{attlist}->[$count-2]->[1]=~ /^_/)) && #this might be buggy by AR 2001/05/28
+          		(!($ele->{attlist}->[$count-2]->[1] =~ /value$/)) &&
+          		(!($ele->{attlist}->[$count-2]->[1] =~ /type$/)) ) {
+
+			# If an attribute (e.g. a property that follows the
+			# propAttr production) is not qualified but its enclosing
+			# (parent) element is from the RDFMS namespace, then the
+			# attribute was prefaced with RDFMS in RDFXML_StartElementHandler().
+			# This must be handled here so that the propAttr is added to the Model.
+        		if(	($ele->{attlist}->[$count-2]->[1] =~ /resource$/) && 
+				($predicateNode) ) {
+          			$resourceFound = 1;
+          			next;
+        		};
+ 
+			next
+				if(	($ele->{attlist}->[$count-2]->[1] =~ /ID$/) ||
+            				($ele->{attlist}->[$count-2]->[1] =~ /bagID$/) ||
+            				($ele->{attlist}->[$count-2]->[1] =~ /about$/) ||
+            				($ele->{attlist}->[$count-2]->[1] =~ /aboutEach$/) ||
+            				($ele->{attlist}->[$count-2]->[1] =~ /aboutEachPrefix$/) ||
+            				($ele->{attlist}->[$count-2]->[1] =~ /parseType$/) );
 		};
 		
-		# ignore order
-		next
-			if(	($RDFStore::Parser::SiRPAC::ENABLE_EXPERIMENTAL) &&
-				($sAttribute =~ /^$RDFStore::Parser::SiRPAC::RDFX_NS/) );
-
       		# expanding predicate element
       		#if( 	($predicateNode) &&
 		#	(!($sAttribute eq $RDFStore::Parser::SiRPAC::RDFMS_resource)) ) {
@@ -1905,12 +1922,24 @@ sub expandAttributes {
 		my $newData =  RDFStore::Parser::SiRPAC::DataElement->new($sValue);
         	push @{$newElement->{children}},$newData;
         	push @{$parent->{children}},$newElement;
-    };
-    return $foundAbbreviation;
+	};
+
+	# If an rdf:resource propAttr was found in this predicate then
+	# cache its value in each of the predicate's elements.  The value
+	# of the this propAttr will be the subject of all of the propAttr's triples
+    	if(	($resourceFound) && (defined $resourceValue) ) {
+		my $i=0;
+        	foreach $i (0..$#{$parent->{children}}) {
+        		$parent->{children}->[$i]->{sResource}= $resourceValue;
+        	}; 
+	};
+	return $foundAbbreviation;
 };
 
 sub parseLiteral {
 	my ($expat) = @_;
+
+#print STDERR "parseLiteral(): ".(caller)[2]."\n";
 
 	foreach(reverse @{$expat->{SiRPAC}->{elementStack}}) {	
 		my $sParseType = getAttributeValue(	$expat,
@@ -1985,8 +2014,12 @@ package RDFStore::Parser::SiRPAC::Element;
 {
 	sub new {
 		my ($pkg, $namespace, $tag, $attlist) = @_;
+
 		$attlist = []
 			unless(defined $attlist);
+
+#print STDERR "RDFStore::Parser::SiRPAC::Element::new(): ".(caller)[2]."\n";
+
 		my $self =  {
 				tag		=>	$tag,
 				sNamespace	=>	$namespace,
@@ -2070,7 +2103,7 @@ RDFStore::Parser::SiRPAC - This module implements a streaming RDF Parser as a di
 	use RDFStore;
 	my $pstore=new RDFStore::Parser::SiRPAC(
                 ErrorContext 	=> 2,
-                Style 		=> 'RDFStore::Parser::SiRPAC::RDFStore',
+                Style 		=> 'RDFStore::Parser::Styles::MagicTie',
                 NodeFactory     => new RDFStore::NodeFactory(),
                 Source  	=> 'http://www.gils.net/bsr-gils.rdfs',
                 store   =>      {
@@ -2128,6 +2161,14 @@ with the RDFStore package.
 =item * Source
 
 This option can be specified by the user to set a base URI to use for the generation of resource URIs during parsing. If this option is omitted the parser will try to generate a prefix for generated resources using the input filename or URL actually containing the input RDF. In a near future such an option could be obsoleted by use of XMLBase W3C raccomandation.
+
+=item GenidNumber
+
+Seed the genid numbers with the given value
+
+=item bCreateBags
+
+Flag to generate a Bag for each Description element
 
 =item * Style
 
@@ -2196,6 +2237,10 @@ This is just an alias for parse for backwards compatibility.
 Open URL_OR_FILE for reading, then call parse with the open handle. If URL_OR_FILE
 is a full qualified URL this module uses Socket(3) to actually fetch the content.
 The URIBASE L<parse()> parameter is set to URL_OR_FILE.
+
+=item getReificationCounter()
+
+Return the latest genid number generated by the parser
 
 =back
 
@@ -2330,7 +2375,7 @@ RDFStore::Stanford::Model(3) RDFStore::NodeFactory(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>
 
 	Sergey Melnik <melnik@db.stanford.edu> is the original author of the streaming version of SiRPAC in Java
 	Clark Cooper is the author of the XML::Parser(3) module together with Larry Wall

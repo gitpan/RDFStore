@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -21,10 +20,18 @@
 # *		- modified toString()
 # *		- fixed bugs when checking references/pointers (defined and ref() )
 # *		- fixed miss-spell in validate()
+# *     version 0.4
+# *		- complete review of the code
+# *		- updated accordingly to new RDFStore::Model
 # *
 
 package RDFStore::SchemaModel;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
+
 use Carp;
 use RDFStore::VirtualModel;
 use RDFStore::Resource;
@@ -33,7 +40,6 @@ use RDFStore::Statement;
 use RDFStore::NodeFactory;
 use RDFStore::Stanford::Digest;
 use RDFStore::Stanford::Digest::Util;
-use RDFStore::FindIndex;
 
 use RDFStore::Vocabulary::RDF;
 use RDFStore::Vocabulary::RDFS;
@@ -47,27 +53,40 @@ sub new {
     	my $self = $pkg->SUPER::new();
 
 	#to emulate typed parameters
-	if ( (defined $factory_or_instances) && (ref($factory_or_instances)) && ($factory_or_instances->isa("RDFStore::Stanford::SetModel")) ) {
+	if ( 	(defined $factory_or_instances) && 
+		(ref($factory_or_instances)) && 
+		($factory_or_instances->isa("RDFStore::Stanford::SetModel")) ) {
 		$self->{nodeFactory}=new RDFStore::NodeFactory();
 		$self->{instances}=$factory_or_instances;
-		if((defined $instances_or_closure) && (ref($instances_or_closure)) && ($instances_or_closure->isa("RDFStore::Stanford::SetModel"))) {
+		if(	(defined $instances_or_closure) && 
+			(ref($instances_or_closure)) && 
+			($instances_or_closure->isa("RDFStore::Stanford::SetModel")) ) {
 			$self->{closure}=$instances_or_closure;
 		};
-	} elsif(  (defined $factory_or_instances) && (ref($factory_or_instances)) &&
-                                ($factory_or_instances->isa("RDFStore::Stanford::NodeFactory"))) {
+	} elsif(	(defined $factory_or_instances) && 
+			(ref($factory_or_instances)) &&
+			($factory_or_instances->isa("RDFStore::Stanford::NodeFactory")) ) {
 		$self->{nodeFactory}=$factory_or_instances;
-		if ( (defined $instances_or_closure) && (ref($instances_or_closure)) && ($instances_or_closure->isa("RDFStore::Stanford::SetModel")) ) {
+		if (	(defined $instances_or_closure) && 
+			(ref($instances_or_closure)) && 
+			($instances_or_closure->isa("RDFStore::Stanford::SetModel")) ) {
 			$self->{instances}=$instances_or_closure;
 		};
-		if((defined $closure) && (ref($closure)) && ($closure->isa("RDFStore::Stanford::SetModel"))) {
+		if(	(defined $closure) && 
+			(ref($closure)) && 
+			($closure->isa("RDFStore::Stanford::SetModel")) ) {
 			$self->{closure}=$closure;
 		};
 	} else {
 		$self->{nodeFactory}=new RDFStore::NodeFactory();
-		if ( (defined $instances_or_closure) && (ref($instances_or_closure)) && ($instances_or_closure->isa("RDFStore::Stanford::SetModel")) ) {
+		if (	(defined $instances_or_closure) && 
+			(ref($instances_or_closure)) && 
+			($instances_or_closure->isa("RDFStore::Stanford::SetModel")) ) {
 			$self->{instances}=$instances_or_closure;
 		};
-		if((defined $closure) && (ref($closure)) && ($closure->isa("RDFStore::Stanford::SetModel"))) {
+		if(	(defined $closure) && 
+			(ref($closure)) && 
+			($closure->isa("RDFStore::Stanford::SetModel")) ) {
 			$self->{closure}=$closure;
 		};
 	};
@@ -116,13 +135,29 @@ sub size {
 	return -1; #unknown
 };
 
-#watch out in sub implementations with DBMS(3)!!!!!!!!
 sub isEmpty {
 	return $_[0]->{instances}->isEmpty();
 };
 
+# Enumerates all triples (including derived) for a given model and schema
 sub elements {
 	#something special here...like merge the instances and closure with SetModel?
+	my $instances;
+	my $closure;
+        if(	($instances=tied %{$_[0]->{instances}}) &&
+        	($closure=tied %{$_[0]->{closure}}) && 
+		(ref($instances) =~ /^Data::MagicTie/) &&
+		(ref($closure) =~ /^Data::MagicTie/) ) {
+
+		#delegate RDFSchema to RDF instances
+		$closure->set_parent($instances); #...but it stays bound forever :((
+		return $_[0]->{closure};
+        } else {
+		#in-memory merge
+		my %result = %{$_[0]->{closure}};
+		map { $result{$_}=$_[0]->{instances}->{$_}; } keys %{$_[0]->{instances}};
+		return \%result;
+        };
 };
 
 # Tests if the model contains the given triple.
@@ -174,16 +209,16 @@ sub find {
 	my $res = $_[0]->{instances}->find($_[1],$_[2],$_[3]);
 
 	# asking for instances - to me it looks really like PEN.pm ;-)
-	if ((defined $_[3]) && ($RDFStore::Stanford::type->equals($_[2]))) {
+	if ((defined $_[3]) && ($RDF::type->equals($_[2]))) {
 		# find instances
 		my $subclass = $_[0]->{closure}->find(undef,$RDFS::subClassOf,$_[3]); 
 
-		if(!($subclass->isEmpty())) {
+		if(!($subclass->isEmpty())) { #SLOW!!!
                 	# collect subproperties
 			my $k;
 			my $v;
 			while (($k,$v) = each %{$subclass->elements()}) {
-          			$res->unite($_[0]->{instances}->find($_[1],$RDFStore::Stanford::type,$v->subject()) );
+          			$res->unite($_[0]->{instances}->find($_[1],$RDF::type,$v->subject()) );
 			};
       		};
 	} elsif($RDFS::subClassOf->equals($_[2])) {
@@ -191,7 +226,7 @@ sub find {
 	} elsif(defined $_[2]) {
 		# Check for subproperties
 		my $subprop = $_[0]->{closure}->find(undef, $RDFS::subPropertyOf,$_[2]);
-      		if(!($subprop->isEmpty())) {
+      		if(!($subprop->isEmpty())) { #SLOW!!!
                 	# collect subproperties
 			my $k;
 			my $v;
@@ -247,9 +282,9 @@ sub computeClosure {
 
 	# disallow loops by default
 	$_[3] = 0
-		if(!(defined $_[3]));
+		unless( (defined $_[3]) && (int($_[3])) );
 
-	my $closure = $_[1]->create();
+	my $closure = $_[1]->create(); #in-memory by default???
 
 	# find all roots
 	my $all = $_[1]->find(undef, $_[2], undef);
@@ -404,7 +439,7 @@ sub validate {
         		my $res = $_[2]->find( $t->object(), $RDFStore::Stanford::type, $RDFS::Class );
 			if($res->isEmpty()) {
           			if($_[0]->noSchema(\@errors, $t->object())) {
-					break;
+					last;
 				} else {
             				$_[0]->invalid( \@errors, $t, $t->object()->toString() . " must be an instance of ". $RDFS::Class);
         			};
@@ -429,7 +464,7 @@ sub validate {
             				push @expected, $domainClass;
             				if(!($_[1]->find($t->subject(),$RDFStore::Stanford::type, $domainClass)->isEmpty())) {
               					$domainOK = 1;
-						break;
+						last;
             				};
           			};
           			if(!($domainOK)) {
@@ -451,7 +486,7 @@ sub validate {
 				my $rangeClass;
 				while ( ($k,$rangeClass)=each %{$ranges->elements}) {
 					next unless(ref($rangeClass));
-            				push @expect,$rangeClass;
+            				push @expected,$rangeClass;
             				# special treatment for Literals
             				if($RDFS::Literal->equals($rangeClass)) {
               					if( $t->object()->isa("RDFStore::Stanford::Literal")) {
@@ -499,7 +534,7 @@ sub invalid {
 	if(scalar(@{$_[1]}) > 0) {
 		push @{$_[1]},"\n";
     		if(defined $_[2]) {
-      			push @{$_[1]},"Invalid statement:\n\t".$t.".\n\t";
+      			push @{$_[1]},"Invalid statement:\n\t".$_[2].".\n\t";
     		};
     	};
 	push @{$_[1]},$_[3];
@@ -533,4 +568,4 @@ DARPA Agent Markup Language (DAML) - http://www.daml.org/
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

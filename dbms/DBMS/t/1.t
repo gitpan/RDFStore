@@ -1,23 +1,26 @@
-$|=1;
-$N=shift || 500;
+print "1..6\n";
 use DBMS;
 use Fcntl;
-no strict;
 
-while(1) {
-	$a=tie %aap, 'DBMS','zappazoink',O_CREAT | O_RDWR 
-		or die "E= $DBMS::DBMS_ERROR $::DBMS_ERROR $! $@ $?";
+$|=1;
+tie %a ,DBMS,'aah',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+tie %b ,DBMS,'bee',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+$a{ key_in_a } = val_in_a;
+$b{ key_in_b } = val_in_b;
+untie %b;
+untie %a;
 
-	for $i (1..$N) {
-		$aap{ $i } = $i;# print "FAIL $::DBMS_ERROR";
-		};
-	print "-";
-	for $i (1..$N) {
-		($c=$aap{ $i }) == $i || print "\nVal Fault\n";
-		print "\nFAIL $::DBMS_ERROR $!\n" unless defined $c;
-		};
-	print "+";
-	untie %aap;
-	exit;
-	# print "[$$]";
-	};
+tie %c ,DBMS,'cee',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+$c{ key_in_c } = val_in_c;
+untie %c;
+
+tie %a ,DBMS,'aah',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+tie %b ,DBMS,'bee',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+$a{ key_in_a } = val_in_a;
+$b{ key_in_b } = val_in_b;
+untie %b;
+untie %a;
+
+tie %c ,DBMS,'cee',O_CREAT|O_RDWR and print "ok\n" or die "could not connect $!";
+$c{ key_in_c } = val_in_c;
+untie %c;

@@ -2,8 +2,8 @@
 TFILE=dbms-`date +%Y-%m-%d`
 
 all: 
-	( cd DBMS; perl Makefile.PL && make )
 	( cd deamon; make )
+	( cd DBMS; perl Makefile.PL && make )
 
 tar:
 	if [ -f DBMS/Makefile ] ; then ( cd DBMS; make clean ); fi
@@ -14,9 +14,12 @@ tar:
 	tar zcf $(TFILE).tar.gz $(TFILE)
 
 clean:
-	( cd DBMS; perl Makefile.PL && make clean; rm *.old )
 	( cd deamon; make clean )
+	( cd DBMS; perl Makefile.PL && make clean; rm *.old )
 
 install: all
-	( cd DBMS; make install )
 	( cd deamon; make install )
+	( cd DBMS; make install )
+
+depend:
+	( cd deamon; make depend )

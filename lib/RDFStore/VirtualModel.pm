@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,12 +7,17 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 
 package RDFStore::VirtualModel;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
+
 use Carp;
 use RDFStore::Model;
 use RDFStore::Stanford::VirtualModel;
@@ -40,15 +44,7 @@ RDFStore::VirtualModel - implementation of the VirtualModel RDF API
 =head1 SYNOPSIS
 
 	use RDFStore::VirtualModel;
-        use RDFStore::NodeFactory;
-        use RDFStore::FindIndex;
-        use Data::MagicTie;
-
-        my $factory= new RDFStore::NodeFactory();
-        my $index_db={};
-        tie %{$index_db},"Data::MagicTie",'index/triples',(Q => 20);
-        my $index=new RDFStore::FindIndex($index_db);
-        my $virtual = new RDFStore::VirtualModel($factory,undef,$index,undef);
+        my $virtual = new RDFStore::VirtualModel( Name => 'triples' );
 
 =head1 DESCRIPTION
 
@@ -60,4 +56,4 @@ RDFStore::Stanford::VirtualModel(3) RDFStore::Model(3) Digest(3) and RDFStore::S
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

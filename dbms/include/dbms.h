@@ -1,12 +1,12 @@
-/* $Id: dbms.h,v 1.3 1999/01/04 19:59:10 dirkx Exp $ $Tag$
+/* $Id: dbms.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $ $Tag$
  */
 #ifndef _H_DBMS
 #define _H_DBMS
 
 #ifdef TIME_DEBUG
-#define		DBMS_PROTO	110
+#define		P0		0
 #else
-#define		DBMS_PROTO	111
+#define		P0		1
 #endif
 
 #define		DBMS_HOST	"127.0.0.1"
@@ -39,6 +39,8 @@
 #define		TOKEN_INC	13 /* atomic increment */
 #define		TOKEN_LIST	14 /* list all keys */
 
+#define		TOKEN_MAX	15 /* last token.. */
+
 struct header {
 	unsigned char	token;
 	unsigned long	len1;
@@ -47,5 +49,28 @@ struct header {
 	struct timeval  stamp;
 #endif
 	};	
+
+#define MAX_STATIC_NAME		256
+#define MAX_STATIC_PFILE	MAXPATHLEN
+
+#ifndef MAX_PAYLOAD
+#define MAX_PAYLOAD	(32*1024)
+#endif
+
+#ifdef STATIC_CS_BUFF
+#define MAX_CS_PAYLOAD	MAX_PAYLOAD
+#define	P2		1	
+#else
+#define P2		0
+#endif
+
+#ifdef STATIC_SC_BUFF
+#define MAX_SC_PAYLOAD	MAX_PAYLOAD
+#define	P1		1
+#else
+#define P1		0
+#endif
+
+#define		DBMS_PROTO	(110+P0*1+P1*2+P2*4)
 
 #endif

@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,18 +7,26 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
 # *     version 0.31
 # *             - fixed nusty bug in digestBytes2HashCode() to cast hash code to INTEGER
+# *     version 0.4
+# *		- fixed stupid/braindead bug when disable warnings- Thanks to Marc Lehmann <pcg@goof.com>
+# *             - fixed a few warnings
+# *		- added getDigestAlgorithm() method
+# *		- Devon Smith <devon@taller.pscl.cwru.edu> changed digestBytes2HashCode() and toHexString() to
+# *		  generate digests and hashes that match Stanford java ones exactly
 # *
 
 package RDFStore::Stanford::Digest::Util;
 {
-
-$SIG{__WARN__} = sub { return undef; }; #to take off the bloody utf warns
+use vars qw ( $VERSION );
+use strict;
+ 
+$VERSION = '0.4';
 
 $RDFStore::Stanford::Digest::Util::perl_version_ok=1;
 eval {
@@ -35,15 +42,23 @@ use RDFStore::Stanford::Digest::SHA1;
 use RDFStore::Stanford::Digest::MD5;
 use RDFStore::Stanford::Digest::Generic;
 
+# return default digest algorithm
+sub getDigestAlgorithm {
+	return "SHA-1";
+};
+
 sub computeDigest {
 	my ($alg,$str) = @_;
 
 	my $md = Digest->new($alg);
-	if($RDFStore::Stanford::Digest::Util::perl_version_ok) {
-		$md->add( unpack("U*",$str) ); # to utf8
-	} else {
-		$md->add( $str ); # old Perl no utf8
-	};
+
+	# **** FIXME!! ****
+	#if($RDFStore::Stanford::Digest::Util::perl_version_ok) {
+		#eval "no warnings 'utf8';"; #this is memory leaking under perl5.6.0 :(
+		#$md->add( unpack("U*",$str) );
+	#} else {
+		$md->add( unpack("C*",$str) ); # old Perl no utf8
+	#};
 	my $d = $md->digest; #you want to keep it :-)
 	croak "Cannot compute Digest for $str"
 		unless(defined $d);
@@ -74,13 +89,17 @@ sub getHashCode {
 sub digestBytes2HashCode {
 	my ($d) = @_;
 
-	my @stuff=split(//,$d);
+        my @stuff=split(//,$d);
 
-	# cast the hash code to integer now :)
-	return int(	(unpack("b*",$stuff[0]) & 0xff) |
-			((unpack("b*",$stuff[2]) & 0xff) << 8) |
-			((unpack("b*",$stuff[4]) & 0xff) << 16) |
-			((unpack("b*",$stuff[6]) & 0xff) << 24) );
+        #use integer; #DS added this pragma but it seems not the same of int() below....
+        return int(        (  (ord $stuff[0]) & 0xff) |
+                        (( (ord $stuff[1]) & 0xff) << 8) |
+                        (( (ord $stuff[2]) & 0xff) << 16) |
+                        (( (ord $stuff[3]) & 0xff) << 24) );
+	#return int(     (unpack("b*",$stuff[0]) & 0xff) |
+        #                ((unpack("b*",$stuff[2]) & 0xff) << 8) |
+        #                ((unpack("b*",$stuff[4]) & 0xff) << 16) |
+        #                ((unpack("b*",$stuff[6]) & 0xff) << 24) );
 };
 
 sub xor {
@@ -213,12 +232,12 @@ sub equal {
 
 sub toHexString {
 	my ($buf) = @_;
-
-	if( ref($buf) && $buf->isa("RDFStore::Stanford::Digest")) {
-		return unpack("h*",$buf->{digest});
-	} else {
-		return unpack("h*",$buf);
-	};
+	
+        if( ref($buf) && $buf->isa("RDFStore::Stanford::Digest")) {
+                return unpack("H*",$buf->{digest});
+        } else {
+                return unpack("H*",$buf);
+        };
 };	
 
 1;
@@ -240,4 +259,4 @@ Digest(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

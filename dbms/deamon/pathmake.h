@@ -1,4 +1,4 @@
-/* $Id: pathmake.h,v 1.1 1998/11/12 11:00:24 dirkx Exp $
+/* $Id: pathmake.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  *
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA

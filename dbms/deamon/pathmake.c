@@ -1,4 +1,4 @@
-/* $Id: pathmake.c,v 1.3 1998/12/02 17:31:49 dirkx Exp $
+/* $Id: pathmake.c,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  *
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA
@@ -32,11 +32,9 @@
 /* returns null and/or full path
  * to a hashed directory tree. 
  * the final filename is hashed out
- * within that three.
-
- * 	#0  0x7682 in mkpath (base=0xefbfdd45 "/pen/dbms", inpath=0x15090 "tiepje")
- *	   at pathmake.c:60
-
+ * within that three. Way to complex
+ * by now. Lifted from another project
+ * which needed more.
  */
 char *
 mkpath(char * base, char * infile)
@@ -62,11 +60,16 @@ mkpath(char * base, char * infile)
 		return NULL;
 		};
 
-	/* remove our standard docroot 
+	/* remove our standard docroot if present
+	 * so we can work with something relative.
+	 * really a legacy thing from older perl DBMS.pm
+	 * versions. Can go now.
 	 */
 	if (!(strncmp(base,inpath,strlen(base))))
 		inpath += strlen(base);
 
+        /* fetch the last leaf name 
+	 */
 	if((file = strrchr(inpath, '/')) != NULL) {
 		*file = '\0';
 		file++;
@@ -83,8 +86,7 @@ mkpath(char * base, char * infile)
  
 	strncpy(hash,file,MIN(strlen(file),MAXHASH));
 
-
-//	strcat(tmp,base,"/",inpath,"/",hash,"/",file);
+//	strcat(tmp,base,"/",inpath,"/",hash,"/",file,NULL);
 	strcpy(tmp,"/");
 	strcat(tmp,base);
 	strcat(tmp,"/");

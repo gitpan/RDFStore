@@ -5,8 +5,8 @@ DBMS			T_PTROBJ
 
 INPUT
 T_DATUM
-	$var.data = SvPV($arg, PL_na);
 	$var.size = (int)PL_na;
+        $var.data = SvPV($arg, PL_na);
 
 OUTPUT
 T_DATUM

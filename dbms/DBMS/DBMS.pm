@@ -1,5 +1,5 @@
 # DBMS.pm -- Perl 5 interface to DBMS scokets
-# $Id: DBMS.pm,v 1.6 1999/01/04 22:31:55 dirkx Exp $
+# $Id: DBMS.pm,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
 #
 =NAME DBMS
 
@@ -56,7 +56,7 @@ an error.
 
 =head1 VERSION
 
-$Id: DBMS.pm,v 1.6 1999/01/04 22:31:55 dirkx Exp $
+$Id: DBMS.pm,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
 
 =head1 AVAILABILITY
 

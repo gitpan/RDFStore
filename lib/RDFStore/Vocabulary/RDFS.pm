@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,12 +7,16 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 
 package RDFS;
 {
+use vars qw ( $VERSION $Class $Container $subClassOf $ContainerMembershipProperty $isDefinedBy $seeAlso $comment $Resource $Literal $label $domain $ConstraintResource $range $ConstraintProperty $subPropertyOf );
+$VERSION='0.4';
+use strict;
+
 use RDFStore::Model;
 use Carp;
 
@@ -25,7 +28,7 @@ use Carp;
 
 # Namespace URI of this schema
 
-$_Namespace= "http://www.w3.org/2000/01/rdf-schema#";
+$RDFS::_Namespace= "http://www.w3.org/2000/01/rdf-schema#";
 use RDFStore::NodeFactory;
 &setNodeFactory(new RDFStore::NodeFactory());
 
@@ -34,59 +37,41 @@ sub createResource {
 		unless( (defined $_[0]) &&
                 	( (ref($_[0])) && ($_[0]->isa("RDFStore::Stanford::NodeFactory")) ) );
 
-	return $_[0]->createResource($_Namespace,$_[1]);
+	return $_[0]->createResource($RDFS::_Namespace,$_[1]);
 };
 sub setNodeFactory {
 	croak "Factory ".$_[0]." is not an instance of RDFStore::Stanford::NodeFactory"
 		unless( (defined $_[0]) &&
                 	( (ref($_[0])) && ($_[0]->isa("RDFStore::Stanford::NodeFactory")) ) );
 	# The concept of Class
-	$Class = createResource($_[0], "Class");
+	$RDFS::Class = createResource($_[0], "Class");
 	# This represents the set Containers.
-	$Container = createResource($_[0], "Container");
+	$RDFS::Container = createResource($_[0], "Container");
 	# Indicates membership of a class
-	$subClassOf = createResource($_[0], "subClassOf");
-	$ContainerMembershipProperty = createResource($_[0], "ContainerMembershipProperty");
+	$RDFS::subClassOf = createResource($_[0], "subClassOf");
+	$RDFS::ContainerMembershipProperty = createResource($_[0], "ContainerMembershipProperty");
 	# Indicates a resource containing and defining the subject resource.
-	$isDefinedBy = createResource($_[0], "isDefinedBy");
+	$RDFS::isDefinedBy = createResource($_[0], "isDefinedBy");
 	# Indicates a resource that provides information about the subject resource.
-	$seeAlso = createResource($_[0], "seeAlso");
+	$RDFS::seeAlso = createResource($_[0], "seeAlso");
 	# Use this for descriptions
-	$comment = createResource($_[0], "comment");
+	$RDFS::comment = createResource($_[0], "comment");
 	# The most general class
-	$Resource = createResource($_[0], "Resource");
+	$RDFS::Resource = createResource($_[0], "Resource");
 	# This represents the set of atomic values, eg. textual strings.
-	$Literal = createResource($_[0], "Literal");
+	$RDFS::Literal = createResource($_[0], "Literal");
 	# Provides a human-readable version of a resource name.
-	$label = createResource($_[0], "label");
+	$RDFS::label = createResource($_[0], "label");
 	# This is how we associate a class with     properties that its instances can have
-	$domain = createResource($_[0], "domain");
+	$RDFS::domain = createResource($_[0], "domain");
 	# Resources used to express RDF Schema constraints.
-	$ConstraintResource = createResource($_[0], "ConstraintResource");
+	$RDFS::ConstraintResource = createResource($_[0], "ConstraintResource");
 	# Properties that can be used in a     schema to provide constraints
-	$range = createResource($_[0], "range");
+	$RDFS::range = createResource($_[0], "range");
 	# Properties used to express RDF Schema constraints.
-	$ConstraintProperty = createResource($_[0], "ConstraintProperty");
+	$RDFS::ConstraintProperty = createResource($_[0], "ConstraintProperty");
 	# Indicates specialization of properties
-	$subPropertyOf = createResource($_[0], "subPropertyOf");
+	$RDFS::subPropertyOf = createResource($_[0], "subPropertyOf");
 };
 1;
 };
-
-__END__
-
-=head1 NAME
-        RDFStore::Vocabulary::RDFS
-
-=head1 SYNOPSIS
-
-        use RDFStore::Vocabulary::RDFS;
-        print $RDFS::Class->toString;
-
-=head1 DESCRIPTION
-
-=head1 SEE ALSO
-
-=head1 AUTHOR
-
-Alberto Reggiori <alberto.reggiori@jrc.it>

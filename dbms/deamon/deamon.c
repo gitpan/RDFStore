@@ -1,5 +1,5 @@
 /* DBMS Server
- * $Id: deamon.c,v 1.6 1999/01/04 22:31:56 dirkx Exp $
+ * $Id: deamon.c,v 1.2 2001/06/18 15:26:17 reggiori Exp $
  *
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA
@@ -30,7 +30,11 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#ifdef BSD
 #include <db.h>
+#else
+#include <db_185.h>
+#endif
 
 #include "dbms.h"
 #include "dbmsd.h"
@@ -40,41 +44,49 @@
 #include "mymalloc.h"
 
 static int going_down = 0;
+int client_counter = 0; /* XX static perhaps */
+
+#ifdef STATIC_BUFF
+static connection * free_connection_list = NULL;
+#endif
+
+#define PTOK { int i; for(i=0; i<sizeof(cmd_table) / sizeof(struct command_req); i++) if ( cmd_table[i].cmd == r->cmd.token ) { log(L_DEBUG,"Token at %s:%d %s s=%d,%d",__FILE__,__LINE__, cmd_table[i].info,r->cmd.len1,r->cmd.len2); break; }; if(i>=sizeof(cmd_table) / sizeof(struct command_req)) log(L_DEBUG,"Token at %s:%d %s %d,%d",__FILE__,__LINE__, "**UNKOWN**",r->cmd.len1,r->cmd.len2); }
 
 void 
 close_connection ( connection * r ) {
-	log(L_VERBOSE,"Closing fd %d",r->clientfd);
 
         FD_CLR(r->clientfd,&allwset);
         FD_CLR(r->clientfd,&allrset);
         FD_CLR(r->clientfd,&alleset);
-
 	close(r->clientfd);
 
         /* shutdown(r->clientfd,2); */
 
+#ifndef STATIC_SC_BUFF
         if (r->sendbuff != NULL)
                 myfree(r->sendbuff);
+		  r->sendbuff = NULL;
+#endif
 
+#ifndef STATIC_CS_BUFF
         if (r->recbuff != NULL)
                 myfree(r->recbuff);
-
-	r->recbuff = r->sendbuff = NULL;
+	 	r->sendbuff = NULL;
+#endif
 
 	r->send = r->tosend = 0;
 	r->gotten = r->toget = 0;
 
-	r->close = 2;
+	r->close = 2; MX;
         return;
         }
                        
 void free_connection (connection * r ) {
-	log(L_VERBOSE,"Freeing connection fd %d type=%d",r->clientfd,r->type);
 
 	if (r->type == C_MUM) {
 		/* connection to the mother lost.. we _must_ exit now.. */
 		if (!going_down) 
-			log(L_FATAL,"Mamma has died.. suicide time %d",mum_fd);
+			log(L_FATAL,"Mamma has died.. suicide time for child, fd=%d",r->clientfd);
 		cleandown(0);
 		} else
 	if (r->type == C_CLIENT) {
@@ -87,7 +99,7 @@ void free_connection (connection * r ) {
 			if (r->dbp->num_cls<=0) {
 				log(L_INFORM,"Child was the last one to use %s, closing\n", 
 					r->dbp->pfile);
-				r->dbp->close = 1;
+				r->dbp->close = 1; MX;
 				};
 			log(L_DEBUG,"Connection to client closed");
 			} 
@@ -117,7 +129,7 @@ void free_connection (connection * r ) {
 			if (p->handled_by->r == r) {
 				if ((c) && (p->handled_by != c))
 					log(L_ERROR,"More than one child pointer ?");
-				p->close = 1;
+				p->close = 1; MX;
 				c = p->handled_by;
 				};
 		if (c==NULL) {
@@ -127,7 +139,7 @@ void free_connection (connection * r ) {
 		/* overkill, as we do not even wait for the
 		 * child to be clean up after itself.
 		 */
-		c->close = 1;
+		c->close = 1; MX;
 		if (kill(c->pid,0) == 0) {
 			/* so the child is still alive ? */
 			log(L_DEBUG,"Sending kill signal (%d) to %d",
@@ -145,13 +157,19 @@ void free_connection (connection * r ) {
 
 	r->type = C_UNK;
 	close_connection(r);
+#ifndef STATIC_BUFF
 	myfree(r);
+#else
+	r->next = free_connection_list;
+	assert( free_connection_list != r );
+	free_connection_list = r;
+#endif
+	client_counter --;
 	return;
 	}
 
 void zap ( connection * r ) {
 	connection * * p;
-	log(L_VERBOSE,"zapping connection %d T=%d",r->clientfd,r->type);
 
 	for ( p = &client_list ; *p && *p != r; )
 		p = &((*p)->next);
@@ -179,7 +197,7 @@ void cleandown( int signo ) {
 
 	/* send a kill to my children 
 	 */
-	if (getpid()==mum_pid)
+	if (!mum_pid)
 		kill(SIGTERM,0);
 
 	close_all_dbps();
@@ -190,28 +208,29 @@ void cleandown( int signo ) {
         for( r=client_list; r;) {
                 connection * q;
                 q = r; r=r->next;
+		assert(q != r);
                 close_connection(q);
                 };
+
 #ifdef DEBUG_MALLOC
 	debug_malloc_dump();
 #endif
 #ifdef TIME_DEBUG
 	fprintf(stderr,"Timedebug: Time waiting=%f, handling=%f network=%f\n",.1,.2,.3);
 #endif
-	/* and call it a day. 
-	 */
-	unlink(pid_file);	
+	if (!mum_pid)
+		unlink(pid_file);	
+
 	log(L_WARN,"Shutdown completed");
 	exit(0);
 	}
 
 void continue_send( connection * r ) {
 	int s;
-	log(L_VERBOSE,"Continued send");
 
 	if ((r->tosend==0) || ( r->send >= r->tosend)) {
 		log(L_ERROR,"How did we get here ?");
-		r->close=1;
+		r->close=1; MX;
 		return;
 		};
 
@@ -244,18 +263,19 @@ void continue_send( connection * r ) {
 		return;
 
 	r->send = r->tosend = 0;
+
+#ifndef STATIC_SC_BUFF
 	myfree( r->sendbuff );
 	r->sendbuff = NULL;
+#endif
 
 	FD_CLR(r->clientfd,&allwset);
-	log(L_DEBUG,"Done(cont) %d\n",time(NULL));
 	return;
 	}
 	
 void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	int s;
 
-	log(L_DEBUG,"Dispatching reply on fd=%d at %d",r->clientfd,time);
 	if ((r->tosend != 0) && (r->send !=0)) {
 		log(L_WARN,"dispatch, but still older data left to send");
 		goto fail_dispatch;
@@ -301,7 +321,7 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 			s = 0;
 			}
 		else {
-			log(L_ERROR,"Initial write error:",strerror(errno));
+			log(L_ERROR,"Initial write error: %s",strerror(errno));
 			goto fail_dispatch;
 			};
 		}
@@ -315,14 +335,25 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	if (r->send == r->tosend) {
 		r->send = 0;
 		r->tosend =0;
+#ifndef STATIC_SC_BUFF
 		r->sendbuff = NULL;
-		log(L_DEBUG,"Done at %d\n",time(NULL));
+#endif
 		}
 	else {
 		int at,i; void * p;
 		/* create a buffer for the remaining data 
 		 */
 	
+#if STATIC_SC_BUFF
+		if (r->tosend-r->send > MAX_SC_PAYLOAD) {
+			log(L_ERROR,	
+				"Secondary write buffer of %d>%d bytes to big",
+				r->tosend - r->send,
+				MAX_SC_PAYLOAD
+				);
+			goto fail_dispatch;
+			};
+#else
 		r->sendbuff = mymalloc( r->tosend - r->send );
 		if (r->sendbuff == NULL) {
 			log(L_ERROR,	
@@ -331,6 +362,7 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 				);
 			goto fail_dispatch;
 			};
+#endif
 		for(p=r->sendbuff,i=0,at=0; i < 3; i++) {
 			if ( at > r->send ) {
 				memcpy(p, r->iov[i].iov_base,r->iov[i].iov_len);
@@ -358,14 +390,13 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 		r->send = 0;
 
 		FD_SET(r->clientfd,&allwset);
-		log(L_VERBOSE,"Secondary send");		
 		};
 
 	return;
 
 fail_dispatch:
 	log(L_WARN,"dispatch failed");
-	r->close=1;
+	r->close=1;MX;
 	return;
 	}
 
@@ -379,79 +410,100 @@ void do_msg ( connection * r, int token, char * msg) {
 	return;
 	}
 
+
 connection *
 handle_new_connection( 
 	int clientfd, int type
 	)
 {
-	connection * new, *r;
-	int i,v;
+	connection * new;
+	int v;
 
-	for( i=0, r=client_list ; r != NULL;  r=r->next) 
-		i++;
-	
-	if (i>HARD_MAX_CLIENTS) {
+	if (client_counter > HARD_MAX_CLIENTS) {
 		log(L_ERROR,"Max number of clients reached (hard max), completely ignoring");
 		close(clientfd);
 		return NULL;
 		};
 
-	if ((new = (connection *) mymalloc(sizeof(connection))) == NULL ) {
-		log(L_ERROR,"Could not claim enough memory");
+	if (client_counter >= max_clients) {
+		connection tmp; 
+		tmp.clientfd = clientfd; 
+		tmp.close = tmp.send = tmp.tosend = tmp.gotten = tmp.toget = 0;
+		reply_log(&tmp,L_ERROR,"Too many connections fd=%d",clientfd);
 		close(clientfd);
 		return NULL;
 		};
 
-	bzero(new,sizeof(new));
-
 	if ( (v=fcntl( clientfd, F_GETFL, 0)<0) || (fcntl(clientfd, F_SETFL,v | O_NONBLOCK)<0) ) {
-		log(L_ERROR,"Coulg not make socket non blocking: %s",strerror(errno));
+		log(L_ERROR,"Could not make socket non blocking: %s",strerror(errno));
 		close(clientfd);
 		return NULL;	
 		};
 
 	FD_SET(clientfd,&allrset);
 	FD_SET(clientfd,&alleset);
+
+	/* XXX we could try to fill holes in the bit array at this point;
+	 *     and get max fd as low as possible. But it seems that the OS
+	 *     already keeps the FDs as low as it can (except for OpenBSD ??)
+	 */
 	if ( clientfd > maxfd ) 
 		maxfd=clientfd;
+
+	/* if still space, use, otherwise tack another
+	 * one to the end..
+	 */
+#if STATIC_BUFF
+	if (free_connection_list != NULL) { 
+		new = free_connection_list;
+		free_connection_list = new->next;
+	}
+	else
+#endif
+	if ((new = (connection *) mymalloc(sizeof(connection))) == NULL ) 
+	{
+		log(L_ERROR,"Could not claim enough memory");
+		close(clientfd);
+		return NULL;
+	};
+        new->next     = client_list;
+        client_list   = new;
+
+	bzero(new,sizeof(new));
 
 	/* Copy the needed information. */
 	new->clientfd = clientfd;
 	new->my_dir   = my_dir;
+#ifndef STATIC_SC_BUFF
 	new->sendbuff = NULL;
+#endif
+#ifndef STATIC_CS_BUFF
 	new->recbuff  = NULL;
+#endif
 	new->dbp      = NULL;
 	new->type     = type;
 #ifdef TIMEOUT
 	new->start    = time(NULL);
 	new->last     = time(NULL);
 #endif
+	new->close      = 0;
 	new->send = new->tosend = new->gotten = new->toget = 0;
 
-        new->next     = client_list;
-        client_list   = new;
-
-	if (i >= max_clients) {
-		log(L_ERROR,"Too many connections");
-		new->close	= 1;
-		}
-	else {
-		new->close      = 0;
-		};
-
+	client_counter ++;
 	return new;
 	}
 
-void final_read( connection * r) {
-
+void final_read( connection * r) 
+{
 	r->toget = r->gotten = 0;
 	parse_request(r);	
 
+#ifndef STATIC_CS_BUFF
 	if (r->recbuff) {
 		myfree(r->recbuff);
 		r->recbuff = NULL;
 		};
-
+#endif
 	return;
 	}
 
@@ -465,28 +517,40 @@ void initial_read( connection * r ) {
 	 */
 	n=recv(r->clientfd,&(r->cmd),sizeof(r->cmd),MSG_PEEK);
 
+	if (n<0) log(L_DEBUG,"Read nn %s",strerror(errno));
+
 	if ((n < 0) && (errno == EAGAIN)) {
+	   log(L_ERROR,"Again read %s on %d",strerror(errno),r->clientfd);
 		return;
 		} 
 	else
 	if ((n < 0) && (errno == EINTR)) {
+	   log(L_ERROR,"Interruped read %s",strerror(errno));
 		return;
 		} 
 	else
 	if (n<0) {
 		if (errno != ECONNRESET)
 			log(L_ERROR,"Read error %s",strerror(errno));
-		r->close=1;
+		r->close=1;MX;
 		return;
 		} 
 	else 
 	if (n==0) {
-		log(L_INFORM,"Client side close on read %s",strerror(errno));
-		r->close=1;
+		log(L_INFORM,"Client side close on read %d/%s (fd=%d)",
+			errno,strerror(errno),r->clientfd);
+		r->close=1;MX;
 		return;
 		}
 	else
-	if ( n == sizeof(r->cmd) ) {
+	if ( n != sizeof(r->cmd) ) {
+		/* lets log this, as we want to get an idea if this actually happens .
+		 * seems not, BSD, on high load, SCO.
+		 */
+		log(L_WARN,"Still waitingn for those 5 bytes, gotten LESS");
+		return;
+		}
+	else {
 #ifdef TIMEE_DEBUG
  		float s,m;
 		struct timeval t;
@@ -503,7 +567,7 @@ void initial_read( connection * r ) {
 #if 0
 		if (( (r->cmd.token) & ~MASK_TOKEN ) != F_CLIENT_SIDE ) {
 			reply_log(r,L_ERROR,"Not a client side token..");
-			r->close=1;
+			r->close=1; MX;
 			return;
 			};
 #endif
@@ -515,39 +579,43 @@ void initial_read( connection * r ) {
 		r->v1.size= r->cmd.len1 = ntohl( r->cmd.len1);
 		r->v2.size= r->cmd.len2 = ntohl( r->cmd.len2);
 
+		// silly endian check.
 #if 1
 		if (r->v1.size > 2*1024*1024) {
 			reply_log(r,L_ERROR,"Size one to big");
-                        r->close=1;
+                        r->close=1; MX;
                         return;
                         };
 
 		if (r->v1.size > 2*1024*1024) {
 			reply_log(r,L_ERROR,"Size two to big");
-                        r->close=1;
+                        r->close=1; MX;
                         return;
                         };
 #endif
-#if 0
-{
-		int i;
-		for(i=0; i<sizeof(cmd_table) / sizeof(struct command_req); i++) 
-                   if ( cmd_table[i].cmd == r->cmd.token ) 
-			log(L_DEBUG,"Token %s s=%d,%d",
-				cmd_table[i].info,r->cmd.len1,r->cmd.len2);
-}
-#endif
 
-		r->recbuff = r->v2.data = r->v1.data = NULL;
+#ifndef STATIC_CS_BUFF
+		r->recbuff = NULL;
+#endif
+		r->v2.data = r->v1.data = NULL;
 		r->toget = r->gotten = 0;
 
 		if (r->cmd.len1 + r->cmd.len2 > 0) {
+#if STATIC_CS_BUFF
+			if (r->cmd.len1 + r->cmd.len2 > MAX_CS_PAYLOAD) {
+				reply_log(r,L_ERROR,
+					"RQ string(s) to big %d>%d bytes",
+					r->cmd.len1 + r->cmd.len2,
+					MAX_CS_PAYLOAD
+					);
+#else
 			r->recbuff = mymalloc( r->cmd.len1 + r->cmd.len2 );
 			if (r->recbuff == NULL) {
 				reply_log(r,L_ERROR,
 					"No Memrory for RQ string(s) %d bytes",
 					r->cmd.len1 + r->cmd.len2);
-				r->close=1;
+#endif
+				r->close=1; MX;
 				return;
 				};
 			r->v1.data = r->recbuff;
@@ -555,43 +623,45 @@ void initial_read( connection * r ) {
 			r->toget = r->cmd.len1 + r->cmd.len2;
 			};
 
-
-		r->iov[0].iov_base = (void *)&skip_cmd;
+		r->iov[0].iov_base = (void *) &skip_cmd;
 		r->iov[0].iov_len = sizeof( r->cmd );
 
 		r->iov[1].iov_base = r->recbuff;
 		r->iov[1].iov_len = r->toget;
 
-reread:		n = readv( r->clientfd, r->iov, 2);
+reread:		
+	   n = readv( r->clientfd, r->iov, 2);
+
 		if ((n<0) && (errno == EINTR)) {
 			log(L_INFORM,"Interrupted readv. Ignored");
 			goto reread;
 			} 
 		else
+		// assert(); but it seems to happen 
 		if ((n<0) && (errno == EAGAIN)) {
-			log(L_ERROR,"Would block. Even though we should get the cmd string. Retry");
+			log(L_ERROR,"Would block. Even though we peeked at the cmd string. Retry");
 			goto reread;
 			} 
 		else
 		if (n<0) {
-			log(L_ERROR,"Error while reading remainder");
-			r->close=1;
+			log(L_ERROR,"Error while reading remainder: (1 %s",strerror(errno));
+			r->close=1; MX;
 			return;
 			}
 		else
 		if (n==0) {
 			log(L_INFORM,"Read, but client closed");
-			r->close=1;
+			r->close=1; MX;
 			return;
 			}
 		else
+		// assert() would be more appropriate.
 		if ( n < sizeof( r->cmd )) {
-			reply_log(r,L_WARN,"Gotten CMD and they someone stole it");
-			r->close=1;
+			reply_log(r,L_WARN,"Peeked CMD and then someone stole it");
+			r->close=1; MX;
 			return;
 			};
 
-		/* book keeping... */
 		n -= sizeof(r->cmd);
 		r->gotten += n;
 
@@ -600,11 +670,8 @@ reread:		n = readv( r->clientfd, r->iov, 2);
 			return;
 			};
 		}
-	else {
-		/* lets log this, as we want to get an idea if this actually happens */
-		log(L_WARN,"Still waitingn for those 5 bytes, gotten just a few");
-		return;
-		};
+	/* should not get here.. */
+	return;
 	}
 
 void
@@ -626,21 +693,23 @@ continue_read( connection * r ) {
 		}
 	else
 	if (s<0) {
-		log(L_ERROR,"Error while reading remainder");
-		r->close=1;
+		log(L_ERROR,"Error while reading remainder: (2 %s",strerror(errno));
+		r->close=1; MX;
 		return;
 		} 
 	else
 	if (s==0) {
 		log(L_ERROR,"continued read, but client closed connection");
-		r->close=1;
+		r->close=1; MX; 
 		return;
 		}; 
 
 	r->gotten +=s;
-	if (r->gotten >= r->toget) {
-		final_read(r);
-		return;
-		};
 
+	if (r->gotten >= r->toget) 
+		final_read(r);
+
+	return;
 	}
+
+

@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 # * Changes:
@@ -19,10 +18,17 @@
 # *     version 0.3
 # *		- fixed bug in intersect() when checking parameter
 # *		- fixed bugs when checking references/pointers (defined and ref() )
+# *     version 0.4
+# *		- updated accordingly to new RDFStore::Model
 # *
 
 package RDFStore::SetModel;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
+
 use RDFStore::Model;
 use RDFStore::Stanford::SetModel;
 use Carp;
@@ -42,11 +48,9 @@ sub intersect {
 	# this operation should atomic (use a "monitor"/lock thingie)
 	my $tmp = $_[0]->duplicate();
 
-	my $k;
-	my $v;
-	while (($k,$v) = each %{$tmp->elements()}) {
-		$_[0]->remove($v)
-			if(!($_[1]->contains($v)));
+	foreach( $tmp->elements ) {
+		$_[0]->remove($_)
+			if(!($_[1]->contains($_)));
 	};
 	return $_[0];
 };
@@ -56,11 +60,8 @@ sub subtract {
 		unless( (defined $_[1]) && (ref($_[1])) &&
 			($_[1]->isa('RDFStore::Stanford::Model')) );
 
-	# this operation should atomic (use a "monitor"/lock thingie)
-	my $k;
-	my $v;
-	while (($k,$v) = each %{$_[1]->elements()}) {
-		$_[0]->remove($v);
+	foreach( $_[1]->elements ) {
+		$_[0]->remove($_);
 	};
 	return $_[0];
 };
@@ -70,11 +71,8 @@ sub unite {
 		unless( (defined $_[1]) && (ref($_[1])) &&
 			($_[1]->isa('RDFStore::Stanford::Model')) );
 
-	# this operation should atomic (use a "monitor"/lock thingie)
-	my $k;
-	my $v;
-	while (($k,$v) = each %{$_[1]->elements()}) {
-		$_[0]->add($v);
+	foreach( $_[1]->elements ) {
+		$_[0]->add($_);
 	};
 	return $_[0];
 };
@@ -91,19 +89,16 @@ RDFStore::SetModel - implementation of the SetModel RDF API
 =head1 SYNOPSIS
 
 	use RDFStore::SetModel;
-        use RDFStore::NodeFactory;
-        use RDFStore::FindIndex;
-        use Data::MagicTie;
-
         my $factory= new RDFStore::NodeFactory();
-        my $index_db={};
-        tie %{$index_db},"Data::MagicTie",'index/triples',(Q => 20);
-        my $index=new RDFStore::FindIndex($index_db);
-	my $set = new RDFStore::SetModel($factory,undef,$index,undef);
+	my $set = new RDFStore::SetModel( Name => 'triples', Split => 9 );
+
+	$set=$set->interset($other_model);
+	$set=$set->unite($other_model);
+	$set=$set->subtract($other_model);
 
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::SetModel implementation using RDFStore::Model and Digested URIs.
+An RDFStore::Stanford::SetModel implementation using RDFStore::Model.
 
 =head1 SEE ALSO
 
@@ -111,4 +106,4 @@ RDFStore::Stanford::SetModel(3) RDFStore::Model(3) Digest(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

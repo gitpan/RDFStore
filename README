@@ -25,7 +25,7 @@ triplets using normal key/value hashes; the storage can happen either
 in-memory data structures (not tie) or on the local filesystem by using the
 DB_File.pm or BerkeleyDB.pm modules. An experimental remote storage service
 is also provided using a custom DBMS.pm module coupled with a fast and
-performant TCP/IP deamon. The deamon has been written entirely in the C
+performant TCP/IP deamon (http://rdfstore.jrc.it/dbms.html). The deamon has been written entirely in the C
 language and is actually storing the data in Berkeley DB v1.x files; such a
 software is similar to the rdfbd (http://web1.guha.com/rdfdb/) approach from Guha.
 The input RDF files are being parsed and processed by using a streaming
@@ -38,17 +38,14 @@ http://www.injektilo.org/rdf/rdf.xsl and Dan Connolly at http://www.w3.org/XML/2
 
 PREREQUISITES
 
-To run RDFStore you need Perl 5.6.0 or newer and the following Perl modules properly installed: 
+To run RDFStore you need Perl and the following modules properly installed:
 
     XML::Parser 
     Storable 
     Digest 
     URI 
-    BerkeleyDB 
 
-To run BerkeleyDB you need Berkeley DB Version 2.6.4 or greater. The official web site for Berkeley DB is http://www.sleepycat.com.
-
-Right now Perl 5.6.0 is required to get utf-8 support on Digest generation and to "localise" the socket handlers in the XML::Parser::PenRDF::wget() method. From version 0.4 (see snap) this problem will be solved switching back to previous typeglob handler way. 
+To use BerkeleyDB support you need Berkeley DB Version 2.6.4 or greater installed together with the Perl BerkeleyDB extension. The official web site for Berkeley DB is http://www.sleepycat.com.
 
 BUILDING AND INSTALLATION
 
@@ -59,39 +56,34 @@ make;
 make test;
 make install;
 
-To build and install DBMS support:
+In addition, you can install the (optional) DBMS module for TCP/IP remote storage by:
+ 
 cd dbms;
 make;
 make install;
+ 
+NOTE: the dbmsd(8) code uses old Berkeley DB 1.x style interface. If you can not get it compile, do not disperate and try to use perl land BerkleyDB, DB_File or SDBM_File styles instead :-)
 
 (by default the dbmsd gets installed under the /RDFStore branch)
 
-If you need to install and compile your own version of Berkeley DB look at here about instructions.
+If you need to install and compile your own version of Berkeley DB look at http://www.sleepycat.com/docs/index.html about instructions.
 
 DOCUMENTATION
 
-I am not finished with a decent documentation of what I have done. You might
-want to refer to the Perl pod documentation coming with the RDFStore
-distribution using hte perldoc command.
-Additionally you can refer to the good Javadoc stuff of Sergey at
-http://www-db.stanford.edu/~melnik/rdf/api-doc/
-If you want to read more about the TCP/IP based storage go at http://pen.jrc.it/documentation/final-technical-report-1999/final-technical-report-1999.htm#_Toc463634472.
+The RDFStore Perl API documentation is now available at http://rdfstore.jrc.it/documentation/api.html. You might want to refer to the Perl pod documentation coming with the RDFStore distribution using hte perldoc command or by browsing through it at http://rdfstore.jrc.it/documentation/pod.
+Additionally you can refer to the good Javadoc stuff of Sergey at http://www-db.stanford.edu/~melnik/rdf/api-doc/ (or at http://rdfstore.jrc.it/documentation/doc/). If you want to read more about the TCP/IP based storage go at http://rdfstore.jrc.it/dbms.html.
 
-RELATED STUFF
+SUPPORT & DEVELOPMENT
 
-Storing RDF in relational databases - http://www-db.stanford.edu/~melnik/rdf/db.html
-The RADIX proposal by Ron Daniel - http://www.mailbase.ac.uk/lists/rdf-dev/1999-06/0002.html
-Redland RDF Application Framework - Perl Interface - http://www.redland.opensource.ac.uk/docs/perl.html
-Web Resource Application Framework (WRAF) - http://sourceforge.net/projects/wraf/
-
-DEVELOPMENT
-
-The homepage for RDFStore is http://xml.jrc.it/RDFStore
+The homepage for RDFStore is http://rdfstore.jrc.it
 A public mailing about technical developments, updates and bug reports
-is available at rdfstore@egroups.com and archived at http://www.egroups.com/group/rdfstore
+is available at rdfstore@yahoogroups.com and archived at http://groups.yahoo.com/group/rdfstore
+
+DEMONSTRATION
+
+An on-line demostration of the capabilities of RDFStore is available at http://rdfstoredemo.jrc.it. It does allow to parse either canonical RDF, strawman xml syntax and query the resulting model. Each model generated while parsing can be dumped back to strawman xml or visualised as GIF picture. 
 
 COPYRIGHT
 
 Copyright (c) 2000 All rights reserved
-Alberto Reggiori / <alberto.reggiori@jrc.it>
-ISIS/RIT, Joint Research Center Ispra (I) 
+Alberto Reggiori <areggiori@webweaving.org>

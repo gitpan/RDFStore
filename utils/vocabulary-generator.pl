@@ -1,8 +1,7 @@
 #!/usr/local/bin/perl -I ../lib
 ##############################################################################
 # 	Copyright (c) 2000 All rights reserved
-# 	Alberto Reggiori / <alberto.reggiori@jrc.it>
-# 	ISIS/RIT, Joint Research Center Ispra (I)
+#	Alberto Reggiori <areggiori@webweaving.org>
 #
 #
 # Redistribution and use in source and binary forms, with or without
@@ -45,8 +44,7 @@
 #
 # ====================================================================
 #
-# This software consists of work developed by the ISIS/RIT group on behalf
-# of the Joint Research Center of the European Commission and was originally
+# This software consists of work developed by Alberto Reggiori and was originally
 # based on public domain software written at the Stanford University Database
 # Group by Sergey Melnik.
 # For more information on the RDF API Draft work, 
@@ -97,15 +95,14 @@ foreach my $schemaURL (@schemas) {
 	my $p=new RDFStore::Parser::SiRPAC( ErrorContext => 2, 
 				Style => 'RDFStore::Parser::Styles::MagicTie',
 				NodeFactory	=> $f,
-				Source	=> $namespace,
-				store	=>	{ persistent	=> 	0 }
-				);
+				Source	=> $namespace );
 
 	my $m = $p->parsefile($schemaURL);
 	print STDERR "Reading schema from ".$schemaURL."\n";
 
         if(!(defined $all)) {
-        	$all = $m->find(); #tricky get a VirtualModel here :-) otherwise it would be a type-cast
+        	#$all = $m->find(); #tricky get a VirtualModel here :-) otherwise it would be a type-cast
+        	$all = $m;
         } else {
         	$all->unite($m);
 	};

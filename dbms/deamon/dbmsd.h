@@ -1,5 +1,5 @@
 /* DBMS Server 
- * $Id: dbmsd.h,v 1.4 1998/12/19 19:43:29 dirkx Exp $
+ * $Id: dbmsd.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  *
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA
@@ -12,6 +12,8 @@
  */
 #ifndef _H_DBMSD
 #define _H_DBMSD
+
+#include <assert.h>	/* XXX wrong place */
 
 #include "dbms.h"
 #include "deamon.h"
@@ -44,6 +46,7 @@ void select_loop();
  * as much as an error.
  */
 #define HARD_MAX_CLIENTS   	MAX_CLIENT+5
+#define HARD_MAX_DBASE		256
 
 /* hard number for the total number of DBMS-es we
  * are willing to server (in total)
@@ -71,4 +74,6 @@ struct child_rec * create_new_child(void);
 int handoff_fd( struct child_rec * child, connection * r );
 int takeon_fd(int conn_fd);
 connection * handle_new_connection( int sockfd , int type);
+
+#define MX log(L_DEBUG,"@@ %s:%d\n",__FILE__,__LINE__);
 #endif

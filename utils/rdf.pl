@@ -1,8 +1,7 @@
 #!/usr/local/bin/perl -I ../lib
 ##############################################################################
 # 	Copyright (c) 2000 All rights reserved
-# 	Alberto Reggiori / <alberto.reggiori@jrc.it>
-# 	ISIS/RIT, Joint Research Center Ispra (I)
+# 	Alberto Reggiori <areggiori@webweaving.org>
 #
 #
 # Redistribution and use in source and binary forms, with or without
@@ -45,8 +44,7 @@
 #
 # ====================================================================
 #
-# This software consists of work developed by the ISIS/RIT group on behalf
-# of the Joint Research Center of the European Commission and was originally
+# This software consists of work developed by Alberto Reggiori and was originally
 # based on public domain software written at the Stanford University Database
 # Group by Sergey Melnik.
 # For more information on the RDF API Draft work, 
@@ -59,7 +57,7 @@ use Carp;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] -strawman -stuff <URL_or_filename> [-store] [-output_dir <valid_directoryname>] [-storename <IDENTIFIER>] [-style <BerkeleyDB|DB_File>] [-split <number>] [-remote] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise]
+    $0 [-h] -strawman -bagIDs -GenidNumberFile -stuff <URL_or_filename> [-output_dir <valid_directoryname>] [-storename <IDENTIFIER>] [-style <BerkeleyDB|DB_File|DBMS>] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise]
 
 Parse an input RDF file and optionally store the generated triplets into a Data::MagicTie(3) database using the RDFStore(3) API.
 
@@ -68,38 +66,39 @@ Parse an input RDF file and optionally store the generated triplets into a Data:
 
 -strawman
 		RDFStore::Parser::OpenHealth parser, RDFStore::Parser::SiRPAC otherwise.
+-bagIDs
+		generates Bag instances for each Description block.
+
+-GenidNumberFile
+		EXISTING valid filename containing a single integer value to seed the parser "genid" numbers with the given value (I.e. for anonymous resources). Note that an exclusive lock on the file is used to guarantee that the value is consistent across runs (and concurrent processes)
 
 -stuff	<URL_or_filename>
 		URL or filename. '-' denotes STDIN
-
-[-store]	
-		Store parsing results on DB files. Default is to use in-memory 
-		datastructures. To use rdfquery.pl later you want to set 1 here :-)
-		(see -output_dir and -storename options also)
 
 [-output_dir <valid_directoryname>]
 		Output directory for DB files generated. Default is cwd.
 
 [-storename <IDENTIFIER>]
-		A label or identifier to identify the RDFStore database
+		A label or identifier to identify the RDFStore database. By setting this option the parsing results 
+		are stored in DB files. Default is to use in-memory datastructures. To use rdfquery.pl later you want 
+		to set 1 here :-)
+		(see -output_dir also)
 
 [-namespace <URL_or_filename>]
 		Specify a string to set a base URI to use for the generation of 
 		resource URIs during parsing
 
-[-style <BerkeleyDB|DB_File>]
-		BerkeleyDB or DB_File store. Default is DB_File.
+[-style <BerkeleyDB|DB_File|DBMS>]
+		BerkeleyDB, DB_File or DBMS store. Default is DB_File.
 
 [-split <number>]
 		Number of DB files to split around - see Data::MagicTie(3)
-[-remote]
-		Use a remote DBMS server. Default is local. If remote it reads -dbms_host 
-		-dbms_port params
+
 [-dbms_host <hostname>]
-		Name or IP number of the DBMS host. Default is 'localhsot' see man dbmsd(8)
+		Name or IP number of the DBMS host. This option makes sense only using the DBMS style; default is 'localhsot' see man dbmsd(8)
 
 [-dbms_port <port>]
-		TCP/IP port number of the DBMS host. Default is 1234
+		TCP/IP port number of the DBMS host. This option makes sense only using the DBMS style; default is 1234
 [-serialise]
 		generate strawman RDF output
 
@@ -108,7 +107,8 @@ EOU
 # Process options
 print $Usage and exit if ($#ARGV<0);
 
-my ($verbose,$namespace,$storename,$strawman,$stuff,$store,$style,$split,$output_dir,$remote,$dbms_host,$dbms_port,$serialise);
+my ($GenidNumberFile, $verbose,$namespace,$storename,$strawman,$stuff,$style,$split,$output_dir,$dbms_host,$dbms_port,$serialise);
+my $bagIDs=0;
 while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
     my $opt = shift;
 
@@ -116,6 +116,8 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
         $stuff = shift;
     } elsif ($opt eq '-namespace') {
         $namespace = shift;
+    } elsif ($opt eq '-GenidNumberFile') {
+        $GenidNumberFile = shift;
     } elsif ($opt eq '-serialise') {
         $serialise = 1;
     } elsif ($opt eq '-strawman') {
@@ -127,16 +129,15 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
 			($storename eq '') || 
 			($storename =~ /\s+/) || 
 			($storename =~ /\/$/) );
-    } elsif ($opt eq '-store') {
-        $store = 1;
     } elsif ($opt eq '-style') {
-	$opt=shift;
-        $style = ($opt eq 'BerkeleyDB') ? $opt : undef;
+	$style=shift;
     } elsif ($opt eq '-h') {
         print $Usage;
         exit;
     } elsif ($opt eq '-v') {
 	$verbose=1;
+    } elsif ($opt eq '-bagIDs') {
+        $bagIDs = 1;
     } elsif ($opt eq '-split') {
 	$opt=shift;
         $split = (int($opt)) ? $opt : 0;
@@ -149,8 +150,6 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
 			($output_dir eq '') || 
 			($output_dir =~ /\s+/) || 
 			($output_dir =~ /\/$/) );
-    } elsif ($opt eq '-remote') {
-        $remote = 1;
     } elsif ($opt eq '-dbms_host') {
         $dbms_host = shift;
     } elsif ($opt eq '-dbms_port') {
@@ -159,6 +158,28 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
     } else {
         die "Unknown option: $opt\n$Usage";
     };
+};
+
+my $cnt;
+if(	(defined $GenidNumberFile) &&
+	(-e $GenidNumberFile) ) {
+	# lock the genid counter
+	open(FH,'+<'.$GenidNumberFile)
+        	or die "Failed to get genid counter $!";
+	# go non buffered.
+	select(FH);
+	$|=1;
+	select(STDOUT);
+	flock FH,2
+        	or die "Failed to get exclusive lock $!";
+	seek FH,0,0
+        	or die "Failed to seek $!";
+	while(<FH>) {
+        	chomp;
+        	$cnt = int $_;
+        };
+	die "No genid counter"
+        	unless defined $cnt;
 };
 
 my $pt;
@@ -175,17 +196,18 @@ my $p=new ${pt}(
 				NodeFactory => 		new RDFStore::NodeFactory(),
 				Source	=> 		(defined $namespace) ?
 								$namespace :
-								$stuff,
+								($stuff =~ /^-/) ? undef : $stuff,
+				bCreateBags =>		(defined $bagIDs) ? $bagIDs : undef,
+				GenidNumber => $cnt,
 				store	=>	{
-							persistent	=> 	$store,
 							seevalues => 	$verbose,
-							directory =>	$output_dir.$storename,
 							options		=> 	{
-								style	=>	$style,
-								dbms_host =>	$dbms_host,
-								dbms_port =>	$dbms_port,
-								Q	=>	$split,
-								lr	=>	$remote }
+										Name	=> 	$output_dir.$storename,
+										Style	=>	$style,
+										Host =>	$dbms_host,
+										Port =>	$dbms_port,
+										Split	=>	$split,
+										Sync    => 1 }
 						}
 				);
 
@@ -199,6 +221,21 @@ if($stuff =~ /^-/) {
 	$m = $nbp->parse_done();
 } else {
 	$m = $p->parsefile($stuff);
+};
+if(	(defined $GenidNumberFile) &&
+	(-e $GenidNumberFile) ) {
+	$cnt = $p->getReificationCounter();
+	seek FH,0,0
+        	or die "Failed to seek $!";
+	print FH $cnt."\n";
+ 
+	select(FH);
+	$|=1;
+	flock FH,8
+        	or die "Failed to unlock genid counter $!";
+	close(FH);
+	die "Issue with lock file $!"
+        	if ($?);
 };
 
 if($serialise) {

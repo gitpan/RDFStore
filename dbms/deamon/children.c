@@ -1,5 +1,5 @@
 /* DBMS Server
- * $Id: children.c,v 1.5 1998/12/19 19:43:29 dirkx Exp $
+ * $Id: children.c,v 1.2 2001/06/18 15:26:17 reggiori Exp $
  *
  * (c) 1998 Joint Research Center Ispra, Italy
  *     ISIS / STA
@@ -14,13 +14,14 @@
  * tasks and subsequent reaping of accidentally terminal
  * cases. 
  *
- * Strategy/Design note
+ * Strategy/Design/Bumpf
+ *
  * 	The idea here is that each time a new/init comes
  *	in from a client; we check if we already have the database
  *	requested open (note; we assume a strict one socket
  *	per database relation). If one of our children already
  *	has the database openened; hand off the connection to
- * 	that child and _FORGET_ about it.
+ * 	that child and forget about the connection.
  *
  *	This way we do not have to worry about locks; as each
  * 	dbm has just one process handling it.
@@ -32,6 +33,13 @@
  *	able to handle RQ's more independently; thus allowing
  *	better utilizition of the bus to the disk; as we have
  *	decoupled the H function.
+ *
+ *	For now we changed to a fork(); rather than pull from a 
+ *	thread pool as in the UKDCils. The main reasons are that
+ *	we are worried about one DB blowing up another, and that
+ *	some of the older FreeBSD production boxes give the same
+ *	problems we had with the IMS user land hangs. But really
+ *	treading would be better; and just require a few mutexi-es.
  */                                   
 #ifdef FORKING
 #include <stdio.h>
@@ -54,55 +62,93 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#ifdef BSD
 #include <db.h>
+#else
+#include <db_185.h>
+#endif
 
 #include "dbms.h"
 #include "dbmsd.h"
 
 #include "deamon.h"
 #include "handler.h"
+#include "children.h"
 #include "mymalloc.h"
-                                                             
-#define CMSG_LEN(x) (ALIGN(sizeof(struct cmsghdr)) + ALIGN(x))
-#define CMSG_SPACE(x) ( ALIGN(sizeof(struct cmsghdr)) + x)
 
+// unpatched solaris and FreeBSD<2.2 need them. I think.
+//
+#ifndef CMSG_LEN                                        
+#define CMSG_LEN(x) (ALIGN(sizeof(struct cmsghdr)) + ALIGN(x))
+#endif
+
+#ifndef CMSG_SPACE
+#define CMSG_SPACE(x) ( ALIGN(sizeof(struct cmsghdr)) + x)
+#endif
+
+#ifdef STATIC_BUFF
+static child_rec * free_child_list = NULL;
+#endif
+int child_counter = 0;
+
+// XXX inline or macro :-) most of the following functions are
+// just used in one or two places..
 
 int atomic_send(
 	int fd,
-  	struct msghdr * msg
+  	struct msghdr * msg,
+	int tosend
 	)
 {
-  int tosend,i;
+  int n;
+  assert(tosend != 0); // otherwise we cannot detect a child close
 
-  for(tosend=0,i=0;i<msg->msg_iovlen;i++)
-	tosend += msg->msg_iov[i].iov_len;
+retry_snd:
+  /* XXX does MSG_WAITALL actually work ?? 
+   * SCO acts strange compared to BSDi....
+   * we normally would do a proper loop;
+   * but this should be atomic accourding
+   * to the BSD man page. 
+   */
+   n=sendmsg(fd,msg,0); 
 
-  while(1) { 
-	/* XXX does MSG_WAITALL actually work ?? */
-	int n=sendmsg(fd,msg,0); 
+   if ((n<0) && ((errno=EAGAIN) || (errno=EINTR))) 
+	goto retry_snd;
+ 
+   if (n<0) { 
+	log(L_ERROR,"Could not atomically send msg: %s",strerror(errno)); 
+	return -1; 
+	} 	
+   else
+   if (n==0) {
+	log(L_ERROR,"Child closed connection"); 
+	return -1; 
+	} 
 
-        if ((n<0) && ((errno=EAGAIN) || (errno=EINTR))) 
-		continue; 
-	if (n<0) { 
-		log(L_ERROR,"Could not atomically send msg: %s",strerror(errno)); 
-		return -1; 
-		}; 
-	if ((n==0) && (tosend)) { 
-		log(L_ERROR,"Child closed connection"); 
-		return -1; 
-		}; 
-	if (n==tosend)
-		return 0;
-	log(L_FATAL,"Assumption wrong, expected atomic %d = %d",n,tosend);
-	return -1;
-	}
+   assert(n==tosend); // who trust the man page ?
+   return 0;
 }
 
 void free_child( child_rec * r) 
 {
-	if (r->r) 
-		r->r->close = 1;
+	log(L_DEBUG,"Freeing child %x %d\n",r,r->pid);
+	if (r->r) {
+		log(L_DEBUG,"And marking close fd=%d\n",r->r->clientfd);
+		r->r->close = 1; MX;
+		};
+
+#ifdef STATIC_BUFF
+	r->nxt = free_child_list;
+	assert( r != free_child_list);
+	free_child_list = r;
+//	free_child_counter ++;
+//	if ((free_child_counter>>2) > child_counter)
+//		cils_cls(); /* clean when 75% idle */
+#else
 	myfree(r);
+#endif
+
+	child_counter--;
 }
 	
 void zap_child( child_rec * r)
@@ -113,11 +159,11 @@ void zap_child( child_rec * r)
         for ( p = &children; *p && *p != r; )
                 p = &((*p)->nxt);
 
-	if (*p == NULL)
-		log(L_ERROR,"Zapping unkown child ? children=%p",children);
+	//if (*p == NULL)
+	//	log(L_ERROR,"Zapping unkown child ? children=%p",children);
+	assert( *p );
 
 	*p = r->nxt;
-
 	free_child(r);
 }
 
@@ -144,29 +190,37 @@ create_new_child( void )
 	 */
 	int pipefd[2];
 	child_rec * child = NULL;
-	pid_t pid;
+	pid_t pid,mum;
 	log(L_INFORM,"Creating new child");
 
 	if ((socketpair(AF_UNIX, SOCK_STREAM,0,pipefd))<0)	
 		return NULL;
 
-	if ( (child = (struct child_rec *) 
-		mymalloc(sizeof(struct child_rec))) == NULL )
-			return NULL;
+/*
+	XXXX
+
+	Braindead... we fork and then always clean all the
+	child cruft; as that child does not need to have
+	global knowledge. i.e. we faul the page and cause
+	a copy on first write and all that. Multi treading
+	used to solve this; but no longer with the new fork().
+*/
+
+	mum=getpid();
 	pid=fork();
 	if (pid <0 ) {
 		log(L_ERROR,"Failed to create a child: %s",strerror(errno));
-		myfree(child);
+
 		return NULL;
 		} else
 	if (pid == 0) {
                 connection * r;
 		struct sigaction 	act,oact;
-
+		mum_pid = mum;
 		mum_fd = pipefd[1];
 		close(pipefd[0]);
 
-		log(L_DEBUG,"Child created - I am the Child %d",pipefd[1]);
+		log(L_DEBUG,"Child created - I am the Child fd=%d",mum_fd);
 
       		FD_CLR(sockfd,&allwset);
         	FD_CLR(sockfd,&allrset);
@@ -184,16 +238,12 @@ create_new_child( void )
 
                 for(r=client_list; r; r=r->next) {
 			r->type = C_LEGACY;
-			r->close=1;
+			r->close=1; MX;
 			};
 
-		log(L_DEBUG,"3 dbps");
-                close_all_dbps();
-		log(L_DEBUG,"3 cholder");
-                clean_children();
-		log(L_DEBUG,"3 done");
+                close_all_dbps(); /* XXX wrong; I should not have any ? */
+                clean_children(); 
 
-		myfree(child);
 		child = NULL;
 
 		/* make sure we listen to our mother... both for
@@ -201,33 +251,44 @@ create_new_child( void )
 		 * used (later) to pass off any connections, (re)do
 		 * an init on; etc, etc.
 		 */
-
-
 		/* XXX no error trapping */
-		handle_new_connection(mum_fd,C_MUM);
+		(void *) handle_new_connection(mum_fd,C_MUM);
 		} 
 	else {
 		/* for the mother.. 
 		 */
+		int childfd = pipefd[0];
 		close(pipefd[1]);
 
-		log(L_DEBUG,"Child created - I am the Mother %d",pipefd[0]);
+		log(L_DEBUG,"Child created - I am the Mother fd=%d",childfd);
+
+#ifdef STATIC_BUFF
+		if ((child = free_child_list) == NULL )
+#endif
+		if ( (child = (struct child_rec *) 
+			mymalloc(sizeof(struct child_rec))) == NULL )
+				return NULL;
+
+		child ->nxt = children;
+		children = child;
+		child_counter ++;
 
 		child->pid=pid;
 		child->r=NULL;
 		child->close=0;
 		child->num_dbs=0;
-		child ->nxt = children;
-		children = child;
 
-		/* XXX no error trapping */
-		child->r = handle_new_connection(pipefd[0],C_CHILD);
+		if ((child->r = handle_new_connection(childfd,C_CHILD)) == NULL) {
+			myfree(child);
+			return NULL;
+			};
 		}
 
 	/* return myself.. or null to signal that
-	 * we are the child
+	 * we are the child.
 	 */
         errno=0;
+	
 	return child;
 }
 
@@ -246,15 +307,9 @@ handoff_fd(
 	} cmsgbuf;
   struct cmsghdr * cmptr;
 
-  if (getpid() != mum_pid) {
-	log(L_FATAL,"Conceptual error, I should be a mother");
-	cleandown(-1);
-	exit(1);
-	};
-
-  log(L_DEBUG, "Handoff, fd=%d across %x %x",
+  assert(mum_pid == 0);
+  log(L_DEBUG, "Handoff fd=%d across on connection fd=%d to child",
 	r ? r->clientfd : 0,
-	child ? child->r : 0,
 	child->r ? child->r->clientfd : 0
 	);
 
@@ -285,8 +340,13 @@ handoff_fd(
   msg.msg_control = NULL;
   msg.msg_controllen = 0;
 
-  if (atomic_send(child->r->clientfd,&msg)<0)
+  if (atomic_send(child->r->clientfd,&msg,
+	iov[0].iov_len + iov[1].iov_len + iov[2].iov_len    )<0) {
+  	log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
+		r->clientfd,child->r->clientfd,
+		strerror(errno));
 	return -1;
+	};
 
   bzero( (void *) &msg, sizeof msg);
   bzero( (void *) &cmsgbuf, sizeof cmsgbuf);
@@ -315,15 +375,22 @@ handoff_fd(
 
   *(int *)CMSG_DATA(cmptr) = r->clientfd;
 
-  if (atomic_send(child->r->clientfd,&msg)<0)
+  if (atomic_send(child->r->clientfd, &msg, 
+	iov[0].iov_len  )<0) {
+  	log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
+		r->clientfd,child->r->clientfd,
+		strerror(errno));
 	return -1;
+	};
 
   /* we did it, forget about any work _we_ where doing
    * on this connection  and/or database association 
    * except perhaps for the pid..
+   * we only mark; to avoid double close if it gets
+   * re-used somehow.
    */
-  close(r->clientfd);
-  r->close = 1;
+  log(L_DEBUG, "Marking fd=%d ass closed",r->clientfd);
+  r->close = 1; MX; 
   r->type = C_LEGACY;
   return  0;
 }
@@ -341,13 +408,8 @@ takeon_fd(int conn_fd)
 	} cmsgbuf;
   struct cmsghdr * cmptr;
 
-  if (getpid() == mum_pid) {
-	log(L_FATAL,"Conceptual error, I should be a child");
-	cleandown(-1);
-	exit(1);
-	};
+  assert(mum_pid != 0);
 	
-  log(L_DEBUG,"Expecting a handoff.");
   /* XXX really needed ? 
    */
   bzero( (void *) &msg, sizeof msg);

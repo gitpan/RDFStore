@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -18,10 +17,21 @@
 # *     version 0.3
 # *		- fixed bug in toPerlName() and dumpVocabulary() avoid grep regex checking
 # *		- fixed bugs when checking references/pointers (defined and ref() )
+# *     version 0.4
+# *		- fixed bug in dumpVocabulary() when matching input namespace (escape plus signs)
+# *		  and output full qualified package variable names of voc properties
+# *		- fixed bug in createVocabulary() when check package name
+# *		- fixed miss-spelling bug in toPerlName()
+# *             - fixed a few warnings
+# *		- updated accordingly to new RDFStore::Model
 # *
 
 package RDFStore::Stanford::Vocabulary::Generator;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
 use Carp;
 
 #bit funny Sergey assuems that we have already these pre-generated....
@@ -35,8 +45,7 @@ sub new {
     	my $self = {};
 
 	$self->{LICENSE} = qq|# *
-# *     Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori\@jrc.it>
-# *     ISIS/RIT, Joint Research Center Ispra (I)
+# *     Copyright (c) 2000 Alberto Reggiori <areggiori\@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -44,7 +53,7 @@ sub new {
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 |;
@@ -76,9 +85,14 @@ sub createVocabulary {
 	$_[5] = $_[0]->{DEFAULT_NODE_FACTORY}
 		unless(defined $_[5]);
 
-	my @info = split("::",$_[1]);
-	$className = pop @info;
-	$packageName = join("::",@info);
+	if($_[1] =~ /::/) {
+		my @info = split("::",$_[1]);
+		$className = pop @info;
+		$packageName = join("::",@info);
+	} else {
+		$packageName = $_[1];
+		$className = $packageName;
+	};
 
 	print "Creating interface " . $className . " within package ". $packageName .  ( (defined $_[4]) ? " in ". $_[4] : ""),"\n";
 
@@ -94,7 +108,8 @@ sub createVocabulary {
 
 		#make it
 		$packageDirectory = $packageName;
-		$packageDirectory =~ s/\:\:/\//g;
+		$packageDirectory = ''
+			unless($packageDirectory =~ s/\:\:/\//g);
 		$packageDirectory = $_[4].$packageDirectory;
 		`mkdir -p $packageDirectory`;
 	};
@@ -113,7 +128,7 @@ sub createVocabulary {
 
 sub toPerlName {
 	my $reserved=0;
-	map { $reserverd=1 if($_ eq $_[1]); } @{$_[0]->{reservedWords}};
+	map { $reserved=1 if($_ eq $_[1]); } @{$_[0]->{reservedWords}};
 	return "_".$_[1]
 		if($reserved);
 
@@ -123,15 +138,42 @@ sub toPerlName {
 };
 
 sub dumpVocabulary {
-	my $out=$_[1]; 
-	if((defined $_[2]) && ($_[2] ne '')) {
-		print $out $_[0]->{LICENSE},"\n";
-		print $out "package ".$_[3].";\n{\n";
-		print $out $_[0]->{NS_IMPORT},"\n";
-		print $out $_[0]->{NS_COMMENT},"\n";
-		print $out $_[0]->{NS_NSDEF},"\n";
-		print $out '$'.$_[0]->{NS_ID}.'= "'.$_[5].'";'."\n";
+	my @els;
+	foreach( $_[4]->elements ) {
+		push @els,$_->subject();
+		push @els,$_->object()
+			if($_->object->isa("RDFStore::Stanford::Resource"));
 	};
+
+	# write resource declarations and definitions
+        my $r1;
+        my @v1;
+        my @pname;
+        my $ns_match = $_[5];
+        $ns_match =~ s/\+/\\\+/g;
+        foreach $r1 ( @els ) {
+                my $res = $r1->toString();
+                if($res =~ /^$ns_match/) {
+                        my $name=substr($res,length($_[5]));
+                        if(length($name) > 0) { #NS already included as a string
+                                my $isthere=0;
+                                map { $isthere=1 if($_ eq $name); } @v1;
+                                unless($isthere) {
+					push @v1,$name;
+        				push @pname,'$'.$_[0]->toPerlName($name);
+				};
+                	};
+        	};
+        };
+
+	my $out=$_[1]; 
+	print $out $_[0]->{LICENSE},"\n";
+	print $out "package ".$_[2].";\n{\n";
+	print $out "use vars qw ( \$VERSION ".join(" ",@pname)." );\n\$VERSION='$VERSION';\nuse strict;\n";
+	print $out $_[0]->{NS_IMPORT},"\n";
+	print $out $_[0]->{NS_COMMENT},"\n";
+	print $out $_[0]->{NS_NSDEF},"\n";
+	print $out '$'.$_[3].'::'.$_[0]->{NS_ID}.'= "'.$_[5].'";'."\n";
 	print $out "use $_[6];\n";
 	print $out '&setNodeFactory(new '.$_[6]."());\n";
 
@@ -141,7 +183,7 @@ sub createResource {
 		unless( (defined $_[0]) &&
                 	( (ref($_[0])) && ($_[0]->isa("RDFStore::Stanford::NodeFactory")) ) );
 
-	return $_[0]->createResource($_Namespace,$_[1]);
+	return $_[0]->createResource($'.$_[3].'::_Namespace,$_[1]);
 };
 sub setNodeFactory {
 	croak "Factory ".$_[0]." is not an instance of RDFStore::Stanford::NodeFactory"
@@ -150,21 +192,14 @@ sub setNodeFactory {
 ';
 
 
-	# write resource declarations adn definitions
-	my @els;
-	my $k;
-	my $s;
-	while( ($k,$s) = each %{$_[4]->elements} ) {
-		next unless(ref($s));
-		push @els,$s->subject();
-		push @els,$s->object()
-			if($s->object->isa("RDFStore::Stanford::Resource"));
-	};
-	my $r;
-	my @v;
+	# write resource declarations and definitions
+        my $r;
+        my @v;
+        #my $ns_match = $_[5];
+        #$ns_match =~ s/\+/\\\+/g;
 	foreach $r ( @els ) {
 		my $res = $r->toString();
-		if($res =~ /^$_[5]/) {
+		if($res =~ /^$ns_match/) {
 			my $name=substr($res,length($_[5]));
 			if(length($name) > 0) { #NS already included as a string
 				my $isthere=0;
@@ -173,22 +208,24 @@ sub setNodeFactory {
 					push @v,$name;
 					my $pname = $_[0]->toPerlName($name);
 					# comment?
-					my ($k,$tComment)= each %{$_[4]->find($r, $RDFS::comment, undef )->elements};
-					
-					($k,$tComment)= each %{$_[4]->find($r, $DAML::comment, undef )->elements}
+					my @tComment = $_[4]->find($r, $RDFS::comment, undef )->elements;
+					my $tComment = shift @tComment;
+					@tComment = $_[4]->find($r, $DAML::comment, undef )->elements;
+					$tComment= shift @tComment
 						unless(	(defined $tComment) &&
 							(ref($tComment)) &&
 							($tComment->isa("RDFStore::Stanford::Statement")) );
-					($k,$tComment)= each %{$_[4]->find($r, $DC::Description, undef )->elements}
+					@tComment = $_[4]->find($r, $DC::description, undef )->elements;
+					$tComment= shift @tComment
 						unless(	(defined $tComment) &&
 							(ref($tComment)) &&
 							($tComment->isa("RDFStore::Stanford::Statement")) );
 					if(defined $tComment) {
-						my $it = $tComment->object()->toString;
-						$it =~ s/\s/ /g;
-						print $out "\t# $it\n";
+						$tComment = $tComment->object->toString;
+						$tComment =~ s/\s/ /g;
+						print $out "\t# $tComment\n";
           				};
-					print $out "\t\$".$pname.' = createResource($_[0], "'.$name."\");\n";
+					print $out "\t\$$_[3]::".$pname.' = createResource($_[0], "'.$name."\");\n";
 				};
           		};
         	};
@@ -207,14 +244,31 @@ RDFStore::Stanford::Vocabulary::Generator - implementation of the Vocabulary Gen
 
 =head1 SYNOPSIS
 
-	use RDFStore::Stanford::Vocabulary::Generator;
-	my $generator = new RDFStore::Stanford::Vocabulary::Generator();
-	# see vocabulary-generator.pl
-	$generator->createVocabulary($packageClass, $all, $namespace, $outputDirectory, $factoryStr);
+ use RDFStore::Stanford::Vocabulary::Generator;
+my $generator = new RDFStore::Stanford::Vocabulary::Generator();
+# see vocabulary-generator.pl
+$generator->createVocabulary($packageClass, $all, $namespace, $outputDirectory, $factoryStr);
 
 =head1 DESCRIPTION
 
-Generate Perl packages with constants for resources defined in an RDF (Schema).
+Generate Perl package with constants for resources defined in an RDF (Schema).
+
+
+=head1 METHODS
+
+=over 
+
+=item B<new()>
+ 
+
+ This is the constructor for RDFStore::Stanford::Vocabulary::Generator.
+
+=item B<createVocabulary(PACKAGECLASS, SCHEMA, NAMESPACE, OUTPUTDIRECTORY, NODE_FACTORY )>
+
+ Generates a Perl 5 package (module) named PACKAGECLASS using SCHEMA in OUTPUTDIRECTORY using NODE_FACTORY.
+ Properties and resources are prefixed with NAMESPACE.
+
+=back
 
 =head1 SEE ALSO
 
@@ -223,4 +277,4 @@ RDFStore::SchemaModel(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

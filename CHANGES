@@ -1,5 +1,164 @@
 Revision history for Perl extension RDFStore.
 
+version 0.4 - Mon Jun 18 17:18:36 CEST 2001
+-------------------------------------------------------------------------------------------
+
+	This a major release. A lot of changes ahs been made to the storage system in parituclar
+	the dbms/ TCP/IP has been compeltely updated and the Data::MagicTie BerkeleyDB has been
+	updated to make properly DB locking to handle concurrency and avoid dead-locks situations.
+	The API modified accordingly to the latest changes in the Stanford Java API 2001-01-19 distribution.
+        (see http://www-db.stanford.edu/~melnik/rdf/rdf-api-2001-01-19.zip)
+	The SiRPAC parser has been also updated accordingly to the latest W3C 
+	version at http://www.w3.org/RDF/Implementations/SiRPAC/
+
+	Updated documentation of all the perl modules and fixed a few typo warnings.
+
+	dbms/CHANGES
+		- added separated changes file for the DBMS module
+
+	Makefile.PL
+		- updated
+
+	RDFStore
+		- removed FindIndex module
+
+	RDFStore::Stanford::Vocabulary::Generator
+		- fixed bug in dumpVocabulary() when matching input namespace (escape plus signs)
+		  and output full qualified package variable names of voc properties
+		- fixed bug in createVocabulary() when check package name
+		- fixed miss-spelling bug in toPerlName()
+		- fixed a few warnings
+		- updated accordingly to new RDFStore::Model
+
+	RDFStore::Model
+		- modifed add() to return undef if the triples exists already in the database
+		- changed way to return undef in subroutines
+		- adapted to use the new Data::MagicTie interface
+		- complete re-design of the indexing and storage method
+		- added getOptions() method
+		- Devon Smith <devon@taller.pscl.cwru.edu> changed getDigestBytes() to generate digests and hashes
+		  that match Stanford java ones exactly
+		- added inheritance from RDFStore::Stanford::Digest::Digestable
+		- removed RDFStore::Stanford::Resource inheritance
+
+	RDFStore::Resource
+		- added check on local name when create a new Resource
+		- allow creation of resources from URI(3) objects or strings using XMLNS LocalPart
+		- hashCode() and getDigest() return separated values for localName and namespace if requested
+
+	RDFStore::SetModel
+		- updated accordingly to new RDFStore::Model
+	
+	RDFStore::Parser::Styles::MagicTie
+		- modified Assert() to print only new statements
+
+	Data::MagicTie
+		- complete redesign of Data::MagicTie. Dropped Data::MagicTie::(DBMS|DB_File|BerkeleyDB) modules
+		  Everything is self contained in one model now.
+		- changed options labels
+		- modified mode option managemnt
+		- added checking if DBMS, BerkeleyDB, DB_File or SDBM_File styles can not be loaded
+		- changed way to return undef in subroutines
+		- remove db files directory if tie operation fails
+		- FIRSTKEY() and NEXTKEY() methods optimised
+		- use File::Path module to create and remove directories to be portable
+		- changed mode to DB_BTREE for DB_File TIEHASH
+		- added BerkeleyDB file locking in TIEHASH and TIEARRAY
+		- took off a few useless sync() calls
+		- dropped lr (local/remote) option
+		- dropped noft (no freeze/thaw) option
+		- added in-memory style
+		- added sharing option
+		- added SDBM_File default style
+		- fixed warning in _keyDB()
+		- added perl version checking for Data::MagicTie::Array methods
+		- added multiple reader/single writer locking support for DB_File
+		- does not generate multiple '.db' extensions to files in _tie()
+
+	t/
+		- updated magictie.t
+		- added rdfstore.t
+
+	samples
+		- zapped a few examples
+		- updated test.pl
+
+	samples/rdf
+		- zapped a few examples
+
+	samples/rdf/vocabularies
+		- zapped a few examples. Updated DAML and foaf schemas
+		- added RSS schema
+		- added XML infoset RDF Schema
+		- zapped DublinCore
+		- added 22-rdf-syntax-ns, rdf-schema, 13-dces and 13-dcq
+
+	RDFStore::Vocabulary::DCQ
+		- added DCQ vocabulary http://dublincore.org/2000/03/13-dcq#
+
+	RDFStore::Vocabulary::DC
+		- updated accordingly to RDFStore::Stanford::Vocabulary::Generator changes and http://dublincore.org/2000/03/13/dces#
+
+	RDFStore::Vocabulary::DAML
+		- updated accordingly to RDFStore::Stanford::Vocabulary::Generator changes and http://www.daml.org/2001/03/daml+oil.daml
+
+	RDFStore::Vocabulary::RDF
+		- updated accordingly to RDFStore::Stanford::Vocabulary::Generator changes
+		- removed rdf:Description, rdf:resource, rdf:about, rdf:aboutEach, rdf:anboutEachPrefix, rdf:ID, rdf:parseType, rdf:parseType (it is up to the application to build resources with them using $RDF::_Namespace)
+
+	RDFStore::Vocabulary::RDFS
+		- updated accordingly to RDFStore::Stanford::Vocabulary::Generator changes
+
+	RDFStore::Stanford::Digest::Util
+		- fixed stupid/braindead bug when disable warnings- Thanks to Marc Lehmann <pcg@goof.com>
+		- added getDigestAlgorithm() method
+		- Devon Smith <devon@taller.pscl.cwru.edu> changed digestBytes2HashCode() and toHexString() to
+		  generate digests and hashes that match Stanford java ones exactly
+
+	RDFStore::Parser::OpenHealth
+		- changed way to return undef in subroutines
+		- fixed warnings in getAttributeValue()
+
+	RDFStore::Parser::SiRPAC
+		- changed way to return undef in subroutines
+		- now creation of Bag instances for each Description block is an option
+		- fixed bug in getAttributeValue() when check attribute name
+		- fixed bug in setSource() when add trailing '#' char	
+		- bug fixing by rob@eorbit.net
+			* Some of the generated URIs were not prepended with #
+			* The parser spits out lots of 'undefined value used' during the parsing process
+		- fixed warnings in getAttributeValue(), RDFXML_StartElementHandler()
+		- added GenidNumber parameter
+		- updated accordingly to http://www.w3.org/RDF/Implementations/SiRPAC/
+		- bug fix in reify() when generate the subject property triple
+		- added getReificationCounter()
+
+	RDFStore::Statement
+		- changed way to return undef in subroutines
+		- fixed warning in getDigest()
+		- updated new() equals() and added hashCode() accordingly to rdf-api-2001-01-19
+		- Devon Smith <devon@taller.pscl.cwru.edu> changed getDigest to generate digests and hashes
+		  that match Stanford java ones exactly
+
+	RDFStore::RDFNode
+		- fixed bug in hashCode() to avoid bulding the digest each time
+		- added inheritance from RDFStore::Stanford::Digest::Digestable
+
+	RDFStore::NodeFactory
+		- changed way to return undef in subroutines
+		- implemented createOrdinal()
+
+	RDStore::Literal
+		- modified getLabel() and getURI() to return a lebel even if the Literal is a BLOB (using Storable)
+		- updated equals() method to make a real comparison of BLOBs using Storable module
+
+	utils/
+		- updated rdf.pl, rdfingest.pl, rdfquery.pl and vocabulary-generator.pl
+		- updated dbcat
+
+	RDFStore::Stanford::Digest::Digestable
+		- added new module which represent objects that can produce a digest 
+
 version 0.31 - Fri Dec 22 15:31:14 CET 2000
 -------------------------------------------------------------------------------------------
 
@@ -64,7 +223,7 @@ version 0.31 - Fri Dec 22 15:31:14 CET 2000
 	Data::MagicTie::BerkeleyDB
 		- completely modified the access methods to Sleepycat library and DBs - see Data::MagicTie::DB_File(3)
 
-	RDFStore::Stanford::Store
+	RDFStore
 		- added use (include) of all RDFStore modules suite
 
 	RDFStore::Model
@@ -86,7 +245,7 @@ version 0.31 - Fri Dec 22 15:31:14 CET 2000
 		- commented off croak in expandAttributes() when 'expanding predicate element' for
 		  production http://www.w3.org/TR/REC-rdf-syntax/#typedNode for xhtml2rdf stuff
 
-	RDFStore::Parser::SiRPACStrawman
+	RDFStore::Parser::OpenHealth
 		- changed wget() Socket handle to work with previous Perl versions (not my $handle) and
 		  do HTTP GET even on HTTP 'Location' redirect header
 		- little change when checking if a prefix is undefined
@@ -94,6 +253,7 @@ version 0.31 - Fri Dec 22 15:31:14 CET 2000
 	utils/
 		- added rdfingest.pl to ingest (S,P,O) comma separated text files right the way
 		- updated rdf.pl rdfquery.pl
+		- added bagIDs option to rdf.pl
 
 version 0.3 - Tue Nov 28 14:02:10 CET 2000
 -------------------------------------------------------------------------------------------

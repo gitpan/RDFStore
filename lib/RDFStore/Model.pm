@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -36,57 +35,127 @@
 # *		- fixed bug in add() when adding statements with a Literal value
 # *		- updated toStrawmanRDF() method
 # *		- modifed add() to avoid update of existing statements
+# *     version 0.4
+# *		- modifed add() to return undef if the triples exists already in the database
+# *		- changed way to return undef in subroutines
+# *		- renamed triples hash to store
+# *		- adapted to use the new Data::MagicTie interface
+# *		- complete re-design of the indexing and storage method
+# *		- added getOptions() method
+# *		- Devon Smith <devon@taller.pscl.cwru.edu> changed getDigestBytes() to generate digests and hashes
+# *               that match Stanford java ones exactly
+# *		- added inheritance from RDFStore::Stanford::Digest::Digestable
+# *		- removed RDFStore::Stanford::Resource inheritance
 # *
 
 package RDFStore::Model;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
+
 use Carp;
 use RDFStore::Stanford::Digest;
+use RDFStore::Stanford::Digest::Digestable;
 use RDFStore::Stanford::Model;
-use RDFStore::Resource;
 use RDFStore::Literal;
 use RDFStore::Statement;
 use RDFStore::NodeFactory;
 use RDFStore::Stanford::Digest::Util;
-use RDFStore::FindIndex;
+use Data::MagicTie;
 
-@RDFStore::Model::ISA = qw( RDFStore::Resource RDFStore::Stanford::Model RDFStore::Stanford::Digest );
+@RDFStore::Model::ISA = qw( RDFStore::Stanford::Model RDFStore::Stanford::Digest RDFStore::Stanford::Digest::Digestable );
 
 sub new {
-	my ($pkg,$factory_or_uri,$triples,$findIndex,$shared) = @_;
+	my ($pkg,%params) = @_;
 
-    	my $self = $pkg->SUPER::new();
+    	my $self = {};
 
-    	#whether triples and lookup are shared
-    	$self->{shared}=(defined $shared) ? $shared : 0;
-    	$self->{uri}=$factory_or_uri
-		if(	(defined $factory_or_uri) && (ref($factory_or_uri)) &&
-                        (!($factory_or_uri->isa("RDFStore::Stanford::NodeFactory"))) );
     	# first find operation creates lookup table
-    	$self->{nodeFactory}=(	(defined $factory_or_uri) && (ref($factory_or_uri)) &&
-				($factory_or_uri->isa("RDFStore::Stanford::NodeFactory"))) ? 
-				$factory_or_uri : new RDFStore::NodeFactory();
+    	$self->{nodeFactory}=(	(exists $params{nodeFactory}) &&
+				(defined $params{nodeFactory}) && 
+				(ref($params{nodeFactory})) &&
+				($params{nodeFactory}->isa("RDFStore::Stanford::NodeFactory")) ) ? 
+				$params{nodeFactory} : new RDFStore::NodeFactory();
 
-	# creates lookup table
-	if( (!(defined $triples)) && (!(defined $findIndex)) ) {
-		$self->{triples}={};
-		$self->{_findIndex} = new RDFStore::FindIndex();
-	} else {
-		$self->{triples}=(	(defined $triples) &&
-					(ref($triples) =~ /HASH/) ) ?
-					$triples :
-					{};
-		$self->{_findIndex} = ( 	(defined $findIndex) && (ref($findIndex)) &&
-						($findIndex->isa("RDFStore::FindIndex")) ) ?
-							$findIndex : 
-							new RDFStore::FindIndex();
+	eval {
+		# I am quite sure that Data::MagicTie and RDFStore::Model can be "merged" in the next release...
+		my $shared = $params{Shared}
+			if(	(exists $params{Shared}) &&
+				(defined $params{Shared}) &&
+				(ref($params{Shared})) &&
+				($params{Shared}->isa("RDFStore::Model")) );
+
+		# lookup tables
+		$self->{resources}={}; # contains a look-up table hashCode -->URI String
+		$self->{sp2o}={}; # all human sensible/readable stuff goes here  - values are bare bone strings :)
+		$self->{po2s}={}; # values are first key in resources table
+		$self->{so2p}={}; # values are first key in resources table
+
+		my $orig_name = $params{Name}
+			if(	(exists $params{Name}) &&
+				(defined $params{Name}) &&
+				($params{Name} ne '') &&
+				($params{Name} !~ m/^\s+$/) );
+
+		#unique
+		delete($params{Duplicates});
+		$params{Name} = $orig_name.'/resources'
+			if(defined $orig_name);
+
+		$params{Shared} = $shared->{resources_db}
+			if(defined $shared);
+        	$self->{resources_db} = tie %{$self->{resources}},'Data::MagicTie',%params;
+		$params{Resources}=$self->{resources_db}->get_Options;
+
+		#use duplicates for these
+		$params{Duplicates}=1;
+
+		$params{Name} = $orig_name.'/index1'
+			if(defined $orig_name);
+		$params{Shared} = $shared->{sp2o_db}
+			if(defined $shared);
+        	$self->{sp2o_db} = tie %{$self->{sp2o}},'Data::MagicTie',%params;
+		$params{Index1}=$self->{sp2o_db}->get_Options;
+
+		$params{Name} = $orig_name.'/index2'
+			if(defined $orig_name);
+		$params{Shared} = $shared->{po2s_db}
+			if(defined $shared);
+        	$self->{po2s_db} = tie %{$self->{po2s}},'Data::MagicTie',%params;
+		$params{Index2}=$self->{po2s_db}->get_Options;
+
+		$params{Name} = $orig_name.'/index3'
+			if(defined $orig_name);
+		$params{Shared} = $shared->{so2p_db}
+			if(defined $shared);
+        	$self->{so2p_db} = tie %{$self->{so2p}},'Data::MagicTie',%params;
+		$params{Index3}=$self->{so2p_db}->get_Options;
+
+		#we should either separate the Data::MagicTie options or zap the ones not needed
+		delete($params{Duplicates});
+
+		$self->{options} = \%params;
+
+		# we keep IDs of queries :)
+		$self->{result}={};
+		$self->{result_db} = tie %{$self->{result}},'Data::MagicTie', Duplicates => 1;
 	};
+	croak "Cannot tie my database storage ".$params{Name}." :( - $! $@\n"
+		if $@;
+
+	$self->{copies}=0;
 
     	bless $self,$pkg;
 };
 
+sub getOptions {
+	return %{$_[0]->{'options'}};
+};
+
 sub getNamespace {
-        return undef;
+        return;
 };
 
 sub getLocalName {
@@ -94,13 +163,10 @@ sub getLocalName {
 };
 
 sub toString {
-        return "Model[" + $_[0]->getSourceURI() + " of size " + $_[0]->size() + "]";
+        return "Model[".$_[0]->getSourceURI()."]";
 };
 
-# Set a base URI for the message.
-# Affects creating of new resources and serialization syntax.
-# <code>null</code> is just alright, meaning that
-# the serializer will use always rdf:about and never rdf:ID
+# Set a base URI
 sub setSourceURI {
 	$_[0]->{uri}=$_[1];
 };
@@ -113,131 +179,209 @@ sub getSourceURI {
 # Model access
 #
 # Number of triples in the model
-# return  number of triples
 sub size {
-	# really not efficient :-(
-	# we should use BerkeleyDB or DB_File tricks hereish...
-	return scalar keys %{$_[0]->{triples}};
+	if(	(exists $_[0]->{options}->{Shared}) &&
+		(defined $_[0]->{options}->{Shared}) ) {
+		my @ids = $_[0]->{result_db}->get_dup('subjects');
+		return $#ids;
+	} else {
+		# really not efficient :-(
+		my $size = keys %{$_[0]->{po2s}}; #reset iterator
+		return scalar keys %{$_[0]->{po2s}}; #count elements
+	};
 };
 
-#watch out in in DBMS(3) implementations!!!!!!!!
 sub isEmpty {
-	# not efficient also - see size()
-	return ($_[0]->size() > 0) ? 0 : 1;
+	my $fk;
+	if(	(exists $_[0]->{options}->{Shared}) &&
+		(defined $_[0]->{options}->{Shared}) ) {
+		$fk = $_[0]->{result_db}->{subjects}; # should be one in-memory fetch
+	} else {
+		#reset iterator
+		my $size = keys %{$_[0]->{po2s}}; #reset iterator
+		$fk = $_[0]->{po2s_db}->FIRSTKEY(); #FIRSTKEY
+	};
+	return (defined $fk) ? 0 : 1;
 };
 
 sub elements {
-	return $_[0]->{triples};
+	# the problem now is with reading in-memory all the results in both cases :(
+	# but we could return a tied Data::MagciTie per component that actually fetch things...
+	#
+
+	my @statements;
+	if(	(exists $_[0]->{options}->{Shared}) &&
+		(defined $_[0]->{options}->{Shared}) ) {
+		#to be finished.....
+	} else {
+		my $object_code;
+		foreach $object_code ( keys %{$_[0]->{sp2o}} ) {
+			my $object=$_[0]->{sp2o}->{$object_code}; #FETCH
+               		if(     (defined $object) &&
+                		(       (ref($object)) ||
+                       		( ($object =~ s/^\"//) && ($object =~ s/\"$//) ) ) ) {
+                		$object = $_[0]->{nodeFactory}->createLiteral($object);
+                	} elsif(        (defined $object) &&
+                			(int($object)) ) {
+                		$object = $_[0]->{resources}->{ $object }; #FETCH
+                       		$object = $_[0]->{nodeFactory}->createResource($object)
+                			if(defined $object);
+                	} else {
+				next;
+                	};
+			my ($subject_code,$predicate_code)=$_[0]->_getValuesFromLookup($object_code);
+			my $subject=$_[0]->{resources}->{$subject_code}; #FETCH
+			my $predicate=$_[0]->{resources}->{$predicate_code}; #FETCH
+			$subject=$_[0]->{nodeFactory}->createResource($subject);
+			$predicate=$_[0]->{nodeFactory}->createResource($predicate);
+			push @statements, $_[0]->{nodeFactory}->createStatement($subject,$predicate,$object);
+		};
+	};
+	return wantarray ? @statements : $statements[0];
 };
 
 # Tests if the model contains the given triple.
-# return  true if the triple belongs to the model;
-# false otherwise.
-# !!!watch out in sub implementations with DBMS(3)!!!!!!!!
 sub contains {
-	if( (defined $_[1]) && (ref($_[1])) && ($_[1]->isa("RDFStore::Stanford::Statement")) ) {
-		#index by label then ;-)
-		return (exists $_[0]->{triples}->{$_[1]->hashCode()}) ? 1 : 0;
-	} else {
-		return (exists $_[0]->{triples}->{$_[1]}) ? 1 : 0;
-	};
+	return (	(defined $_[1]) && (ref($_[1])) && 
+			($_[1]->isa("RDFStore::Stanford::Statement")) &&
+			(exists($_[0]->{po2s}->{  #EXISTS
+				$_[0]->_getLookupValue(  
+						scalar($_[1]->predicate->hashCode()),
+						scalar($_[1]->object->hashCode()) ) })) ) ? 1 : 0;
 };
 
 # Model manipulation: add, remove, find
 #
 # Adds a new triple to the model
 sub add {
-	croak "Subject or Statement ".$_[1]." is not either instance of RDFStore::Stanford::Statement or RDFStore::Stanford::Resource"
-                unless( (defined $_[1]) && (ref($_[1])) && (($_[1]->isa('RDFStore::Stanford::Resource')) || ($_[1]->isa('RDFStore::Stanford::Statement'))) );
-	croak "Predicate ".$_[2]." is not instance of RDFStore::Stanford::Resource"
-                unless( (not(defined $_[2])) || ( (ref($_[2])) && ($_[2]->isa('RDFStore::Stanford::Resource')) ) );
+	my ($class, $subject,$predicate,$object) = @_;
 
-	$_[0]->makePrivate();
+	croak "Subject or Statement ".$subject." is not either instance of RDFStore::Stanford::Statement or RDFStore::Stanford::Resource"
+                unless(	(defined $subject) && 
+			(ref($subject)) && 
+			(	($subject->isa('RDFStore::Stanford::Resource')) || 
+				($subject->isa('RDFStore::Stanford::Statement')) ) );
+	croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
+                unless(	(not(defined $predicate)) || 
+			(	(defined $predicate) &&
+				(ref($predicate)) && 
+				($predicate->isa('RDFStore::Stanford::Resource')) &&
+				($subject->isa('RDFStore::Stanford::Resource')) ) );
+	croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
+                unless(	(not(defined $object)) || 
+			( ( ( (defined $object) && 
+                              (ref($object)) && 
+                              ($object->isa('RDFStore::Stanford::RDFNode'))) ||
+			    ( (defined $object) && 
+                              ($object !~ m/^\s+$/)) ) && #should work also for BLOBs
+			  ($subject->isa('RDFStore::Stanford::Resource')) &&
+			  ($predicate->isa('RDFStore::Stanford::Resource')) ) );
 
-	my $t;
-	if( (defined $_[1]) && (ref($_[1])) && ($_[1]->isa("RDFStore::Stanford::Statement")) ) {
-		$t = $_[1];
-	} elsif( (defined $_[1]) && (ref($_[1])) && ($_[1]->isa("RDFStore::Stanford::Resource")) ) {
-		if( (defined $_[3]) && (ref($_[3])) && ($_[3]->isa("RDFStore::Stanford::Resource")) ) {
-			$t = $_[0]->{nodeFactory}->createStatement($_[1],$_[2],$_[3]);
-		} else { #otherwise create a literal
-			$t = $_[0]->{nodeFactory}->createStatement($_[1],$_[2],
-						$_[0]->{nodeFactory}->createLiteral($_[3]));
-		};
+	if( 	(defined $subject) &&
+		(ref($subject)) && 
+		($subject->isa("RDFStore::Stanford::Statement")) ) {
+		($subject,$predicate,$object) = ($subject->subject, $subject->predicate, $subject->object);
+	} elsif(	(defined $object) && 
+			(!(ref($object))) ) {
+			$object = $class->{nodeFactory}->createLiteral($object);
 	};
 
-	my $code = $t->hashCode();
+	my ($subject_code,$predicate_code,$object_code) = (
+                        (defined $subject) ? scalar($subject->hashCode()) : undef,
+                        (defined $predicate) ? scalar($predicate->hashCode()) : undef,
+                        (defined $object) ? scalar($object->hashCode()) : undef );
 
-	#do not update existing statements
-	return
-		if( (exists $_[0]->{triples}->{$code}) && (defined $_[0]->{triples}->{$code}) );
+	my $sp_code = $class->_getLookupValue($subject_code,$predicate_code);
+	my $po_code = $class->_getLookupValue($predicate_code,$object_code);
+	my $so_code = $class->_getLookupValue($subject_code,$object_code);
 
-	$_[0]->{triples}->{$code} = $t; #STORE
+	# store them
+	# store resources if necessary - an EXISTS operation is always required
+	$class->{resources}->{$subject_code} = $subject->toString		#STORE
+		unless(exists $class->{resources}->{$subject_code}); 		#EXISTS
+	$class->{resources}->{$predicate_code} = $predicate->toString 		#STORE
+		unless(exists $class->{resources}->{$predicate_code}); 		#EXISTS
 
-	$_[0]->{_findIndex}->addLookup($t)
-		if(defined $_[0]->{_findIndex});
+	#object_code is the same either for RDFStore::Literal or RDFStore::Resource
+	$class->{resources}->{$object_code} = $object->toString			#STORE
+		if(	($object->isa("RDFStore::Stanford::Resource")) &&
+			(!(exists $class->{resources}->{$object_code})) );	#EXISTS
 
-	$_[0]->updateDigest($t);
+	# store indexes - we AVOID repeated values per multiple key for indexes
+	# NOTE: fetch in-memory internally in Data::MagicTie if style DBMS :(
+	my $obj_value = (	(ref($object)) && 
+				($object->isa("RDFStore::Stanford::Resource")) ) ?
+				scalar($object->hashCode()) :
+				(ref($object->toString)) ?
+					$object->toString : # store generic BLOBs by using Data::MagicTie :)
+					'"'.$object->toString.'"';
+	$class->{sp2o}->{ $sp_code } = $obj_value #STORE
+		if($class->{sp2o_db}->find_dup($sp_code,$obj_value)==1); #find_dup
+	$class->{po2s}->{ $po_code } = scalar($subject->hashCode()) #STORE
+		if($class->{po2s_db}->find_dup($po_code,scalar($subject->hashCode()))==1); #find_dup
+	$class->{so2p}->{ $so_code } = scalar($predicate->hashCode())	#STORE
+		if($class->{so2p_db}->find_dup($so_code,scalar($predicate->hashCode()))==1); #find_dup
+
+	if(	(exists $class->{options}->{Sync}) &&
+		(defined $class->{options}->{Sync}) ) {
+		#sync :(
+		$class->{resources_db}->sync();
+		$class->{sp2o_db}->sync();
+		$class->{po2s_db}->sync();
+		$class->{so2p_db}->sync();
+	};
+
+	$class->updateDigest($subject,$predicate,$object);
 };
 
 sub updateDigest {
-	croak "Statement ".$_[1]." is not instance of RDFStore::Stanford::Statement"
-                unless( (defined $_[1]) && (ref($_[1])) && ($_[1]->isa('RDFStore::Stanford::Statement')));
+	delete $_[0]->{digest};
 
-      	return
-		unless(defined $_[0]->{digest});
-
+      	#return
+	#	unless(defined $_[0]->{digest});
 	# see http://nestroy.wi-inf.uni-essen.de/rdf/sum_rdf_api/#K31
 	#my $digest = $_[1]->getDigest();
-
       	#RDFStore::Stanford::Digest::Util::xor($_[0]->{digest}->getDigestBytes(),$digest->getDigestBytes());
-
-	delete $_[0]->{digest};
-};
-
-sub validLookup {
-	return 0;
-};
-
-sub makePrivate {
-	# if we have a clone, tell clone to detach
-	if(	(defined $_[0]->{myClone}) && 
-		( (defined $_[0]->{myClone}->{shared}) && ($_[0]->{myClone}->{shared}) ) ) {
-		$_[0]->{myClone}->makePrivate();
-		$_[0]->{myClone} = undef;
-	};
-	if( (defined $_[0]->{shared}) && ($_[0]->{shared}) ) {
-		# for find() query stuff we can easily assume that everything is done
-		# in-memory and then we can use Perl constructs. Otherwise we could somehow
-		# pass here an external tied hash for copied data.
-		if( (exists $_[0]->{shared_triples}) && (defined $_[0]->{shared_triples}) ) {
-			%{$_[0]->{shared_triples}}=%{$_[0]->{triples}}; #copy
-			$_[0]->{triples} = $_[0]->{shared_triples};
-		} else {
-			# in-memory case - it is the most common for find() queries
-			my %detached_triples = %{$_[0]->{triples}}; #copy
-			$_[0]->{triples} = \%detached_triples;
-		};
-		if( (exists $_[0]->{shared_findIndex}) && (defined $_[0]->{shared_findIndex}) ) {
-			$_[0]->{_findIndex} = $_[0]->{shared_findIndex};
-		} else {
-			$_[0]->{_findIndex} = new RDFStore::FindIndex();
-		};
-		$_[0]->{shared}=0;
-	};
 };
 
 # Removes the triple from the model
 sub remove {
 	croak "Statement ".$_[1]." is not instance of RDFStore::Stanford::Statement"
-                unless( (defined $_[1]) && (ref($_[1])) && ($_[1]->isa('RDFStore::Stanford::Statement')));
+                unless(	(defined $_[1]) && 
+			(ref($_[1])) && 
+			($_[1]->isa('RDFStore::Stanford::Statement')) );
 
-	$_[0]->makePrivate();
+	# NOTE: it is not really safe here - we might need to lock all the three DBs, del statement, unlock and return (TXP) :)
+	# we do not zap any resource...it does not matter for the moment due we should save a lot of disk space anyway :)
+	$_[0]->{sp2o_db}->del_dup( 
+		$_[0]->_getLookupValue(	
+			scalar($_[1]->subject->hashCode()),
+			scalar($_[1]->predicate->hashCode()) ),
+				(	(ref($_[1]->object)) && 
+					($_[1]->object->isa("RDFStore::Stanford::Resource")) ) ?
+					scalar($_[1]->object->hashCode()) :
+					(ref($_[1]->object->toString)) ?
+					$_[1]->object->toString : #zap BLOBs
+					'"'.$_[1]->object->toString.'"' );
+	$_[0]->{po2s_db}->del_dup( 
+		$_[0]->_getLookupValue(	
+			scalar($_[1]->predicate->hashCode()),
+			scalar($_[1]->object->hashCode()) ),
+				scalar($_[1]->subject->hashCode()) );
+	$_[0]->{so2p_db}->del_dup( 
+		$_[0]->_getLookupValue(	
+			scalar($_[1]->subject->hashCode()),
+			scalar($_[1]->object->hashCode()) ),
+				scalar($_[1]->predicate->hashCode()) );
 
-	delete $_[0]->{triples}->{$_[1]->hashCode()}; #DELETE
-
-	$_[0]->{_findIndex}->removeLookup($_[1])
-		if(defined $_[0]->{_findIndex});
+	if(	(exists $_[0]->{options}->{Sync}) &&
+		(defined $_[0]->{options}->{Sync}) ) {
+		#sync :(
+		#$_[0]->{resources_db}->sync();
+		$_[0]->{sp2o_db}->sync();
+		$_[0]->{po2s_db}->sync();
+		$_[0]->{so2p_db}->sync();
+	};
 
 	$_[0]->updateDigest($_[1]);
 };
@@ -248,189 +392,141 @@ sub isMutable {
 
 # General method to search for triples.
 # null input for any parameter will match anything.
-# Example: Model result = m.find( null, RDF.type, new Resource("http://...#MyClass") )
-# finds all instances of the class MyClass
+# Example: $result = $m->find( undef, $RDF::type, new RDFStore::Resource("http://...#MyClass") );
+# finds all instances of in the model
 sub find {
-	croak "Subject ".$_[1]." is not instance of RDFStore::Stanford::Resource"
-                unless( (not(defined $_[1])) || ( (ref($_[1])) && ($_[1]->isa('RDFStore::Stanford::Resource')) ) );
-	croak "Predicate ".$_[2]." is not instance of RDFStore::Stanford::Resource"
-                unless( (not(defined $_[2])) || ( (ref($_[2])) && ($_[2]->isa('RDFStore::Stanford::Resource')) ) );
-	croak "Object ".$_[3]." is not instance of RDFStore::Stanford::RDFNode"
-                unless( (not(defined $_[3])) || ( (ref($_[3])) && ($_[3]->isa('RDFStore::Stanford::RDFNode')) ) );
+	my ($class,$subject,$predicate,$object) = @_;
 
-	#for shared stuff
-	my ($result_triples,$result_findIndex);
-	if( (defined $_[4]) && (ref($_[4]) =~ /HASH/) ) {
-		$result_triples=$_[4]; #we put the query results in a special HASH :)
-	};
-	if( (defined $_[5]) && (ref($_[5])) && ($_[5]->isa("RDFStore::FindIndex")) ) {
-		$result_findIndex=$_[5];
-	};
+	croak "Subject ".$subject." is not instance of RDFStore::Stanford::Resource"
+                unless(	(not(defined $subject)) || 
+				( 	(defined $subject) &&
+					(ref($subject)) && 
+					($subject->isa('RDFStore::Stanford::Resource')) ) );
+        croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
+                unless( (not(defined $predicate)) || 
+				(	(defined $predicate) &&
+					(ref($predicate)) && 
+					($predicate->isa('RDFStore::Stanford::Resource')) ) );
+        croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
+                unless( (not(defined $object)) || 
+				(	(defined $object) &&
+					(ref($object)) && 
+					($object->isa('RDFStore::Stanford::RDFNode')) ) );
 
 	# we have the same problem like in Pen - a result set must be a model/collection :-)
-	my $res = $_[0]->create(undef,$result_triples,$result_findIndex,undef); #EMPTY MODEL
+	my $res = $class->create(); #EMPTY MODEL
 
-	# we avoid this due to efficency problems with DBMS(3) remote DBs
-	# this is check might be safely skipped anyway
-        #return $res
-	#	if($_[0]->isEmpty());
+	# we avoid this because is doing a FK :) - this is check might be safely skipped anyway
+        #return $res if($class->isEmpty());
 
-	return $_[0]->duplicate($result_triples,$result_findIndex)
-		if( (not(defined $_[1])) && (not(defined $_[2])) && (not(defined $_[3])) );
+	return $class->duplicate()
+		if(	(not(defined $subject)) && 
+			(not(defined $predicate)) && 
+			(not(defined $object)) );
 
-	my $en;
-	my $t;
-	my $key;
-	if(defined $_[0]->{_findIndex}) {
-		# when index we have a different result set to look at
-		$en = $_[0]->{_findIndex}->multiget($_[1],$_[2],$_[3]);
+	# add results to the query model
+	map {
+#print STDERR "model_find: '".$_->toString."'\n";
+		if(	(defined $subject) &&
+			(defined $predicate) ) {
+			$res->add($subject,$predicate,$_);
+		} elsif(	(defined $subject) &&
+				(defined $object) ) {
+			$res->add($subject,$_,$object);
+		} elsif(	(defined $predicate) &&
+				(defined $object) ) {
+			$res->add($_,$predicate,$object);
+		};
+	} $_[0]->fetchRDFNode($subject,$predicate,$object);
 
-		# NOTE: the first element of $en is "spurious" id for 'undef,undef,undef' that is
-		# already checked at the beginning of this method
-		foreach $t (@{$en}) {
-			unless( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) ) {
-				# it was an indirect index
-				$t = $_[0]->{triples}->{ $t }; #FETCH from triples
-			};
-	
-			my $matchStatement=1;
-			if(	( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) ) &&
-				( ( (defined $_[1]) && (ref($_[1])) && (!($t->subject()->equals($_[1]))) ) ||
-				  ( (defined $_[2]) && (ref($_[2])) && (!($t->predicate()->equals($_[2]))) ) ||
-				  ( (defined $_[3]) && (ref($_[3])) && (!($t->object()->equals($_[3]))) ) ) ) {
-				$matchStatement=0;
-			};
-
-                	$res->add($t)
-				if( 	( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) ) && ($matchStatement) );
-                };
-	} else {
-		# when here we do not have an index set :(
-		$en=$_[0]->{triples};
-		while(($key,$t) = each %{$en}) {
-			my $matchStatement=1;
-			if(	( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) ) &&
-				( ( (defined $_[1]) && (!($t->subject()->equals($_[1]))) ) ||
-				  ( (defined $_[2]) && (!($t->predicate()->equals($_[2]))) ) ||
-				  ( (defined $_[3]) && (!($t->object()->equals($_[3]))) ) ) ) {
-				$matchStatement=0;
-			};
-
-                	$res->add($t)
-				if( 	( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) ) &&
-					($matchStatement) );
-                };
-        };
         return $res;
 };
 
-# Clone the model
+# Clone the model - So due that copy is epensive we use sharing :)
 sub duplicate {
-	#for shared stuff
-	if( (defined $_[1]) && (ref($_[1]) =~ /HASH/) ) {
-		$_[0]->{shared_triples}=$_[1];
-	};
-	if( (defined $_[2]) && (ref($_[2])) && ($_[2]->isa("RDFStore::FindIndex")) ) {
-		$_[0]->{shared_findIndex} = $_[2];
-	};
+	my ($class) = @_;
 
-	if( (!(defined $_[0]->{myClone})) || (!($_[0]->{myClone}->{shared})) ) {
-		my $self=ref($_[0]);
-		# creates a model that shares triples and lookup with this model
-		return $_[0]->{myClone} = $self->new(	$_[0]->{uri},
-							(defined $_[0]->{shared_triples}) ?
-								$_[0]->{shared_triples} : 
-								$_[0]->{triples},
-							(defined $_[0]->{shared_findIndex}) ?
-								$_[0]->{shared_findIndex} :
-								((defined $_[0]->{_findIndex}) ? 
-									$_[0]->{_findIndex} : 
-									undef), 1 ); #shared
-	} else {
-		$_[0]->{myClone}->duplicate();
-	};
+	# create and return a model that shares store and lookup with this model
+	my $self=ref($class);
+	my $new = $self->new( Shared => $class ); # Shared here means a little bit different than Data::MagicTie
+	return $new;
 };
 
-sub clone {
-	return $_[0]->duplicate(@_);
-};
-
-# Creates empty model of the same Class
+# Creates in-memory empty model
 sub create {
 	my $self = ref(shift);
-	return $self->new(@_);
+	return $self->new(); #no Data::MagicTie options passed through for the moment
 };
 
 sub getNodeFactory {
 	return $_[0]->{nodeFactory};	
 };
 
+sub getLabel {
+	return $_[0]->getURI;
+};
+
 sub getDigest {
-	# we do NOT carry out the whole model digest here - JAVA uses Digestable inteface :(
-	if(not(defined $_[0]->{digest})) {
-		my $digest_bytes;
-		# this does not work under MagicTie yet :(
-		my $key;
-		my $t;
-		while(($key,$t) = each %{$_[0]->{triples}}) {
-      			my $d = $t->getDigest();
-      			if(not(defined $digest_bytes)) {
-        			$digest_bytes = $d->getDigestBytes();
-      			} else {
-				RDFStore::Stanford::Digest::Util::xor($digest_bytes,$d->getDigestBytes());
-    			};
-		};
-		$_[0]->{digest} = RDFStore::Stanford::Digest::Util::createFromBytes($_[0]->{algorithm},$digest_bytes);
-	};
-	return $_[0]->{digest};
+	return $_[0];
 };
 
 sub getURI {
 	if($_[0]->isEmpty()) {
       		return $_[0]->{nodeFactory}->createUniqueResource()->toString();
     	} else {
-		return "uuid:rdf:".
+		return "urn:rdf:".
 				$_[0]->getDigestAlgorithm ."-".
-				RDFStore::Stanford::Digest::Util::toHexString($_[0]->getDigest());
+				RDFStore::Stanford::Digest::Util::toHexString( $_[0]->getDigest() );
       	};
 };
 
 sub getDigestAlgorithm {
-	return $_[0]->{algorithm};
+	return &RDFStore::Stanford::Digest::Util::getDigestAlgorithm();
 };
 
 sub getDigestBytes {
-	#do something hereish......	
-	if(not(defined $_[0]->{digest})) {
-		$_[0]->{digest} = $_[0]->getDigest();
-	}; 
-	#$_[0]->{digest_bytes} = $_[0]->{digest}->getDigestBytes();
-        #return \$_[0]->{digest_bytes};
+	unless ( defined $_[0]->{digest} ) {
+        	sub digest_sorter {
+            		my @a1 = unpack "c*", ${ $a->getDigest()->getDigestBytes() };
+            		my @b1 = unpack "c*", ${ $b->getDigest()->getDigestBytes() };
+            		my $i;
+            		for ($i=0; $i < $#a1 +1; $i++) {
+              			return $a1[$i] - $b1[$i] unless ord $a1[$i] == ord $b1[$i];
+            		};
+            		return 0;
+          	};
+        	my $t;
+        	my $digest_bytes;
+        	for  $t ( sort digest_sorter $_[0]->elements ){
+          		$digest_bytes .= $ { $t->getDigest()->getDigestBytes() };
+        	};
+        	$_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest($_[0]->getDigestAlgorithm,
+					$digest_bytes);
+	};
 	return $_[0]->{digest}->getDigestBytes();
 };
 
 #serialise model to strawman syntax - see XML::Parser::OpenHealth(3)
+# it could return a kind of tied filehandle/stream :)
 sub toStrawmanRDF {
 	# here we should use RDFStore::Stanford::Vocabulary::RDF definitions....
 	my $rdf= '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE rdf:RDF [ <!ENTITY rdf "http://www.w3.org/1999/02/22-rdf-syntax-ns#"> ]><rdf:RDF xmlns:rdf="&rdf;">';
 	$rdf .= "\n";
-	my($k,$t,$en);
-	# when here we do not have an index set :(
-	while(($k,$t) = each %{ $_[0]->{triples} }) {
-		next
-			unless( (defined $t) && (ref($t)) && ($t->isa("RDFStore::Stanford::Statement")) );
-		$rdf .= '<rdf:Statement ID="'.$t->getURI().'">'."\n";
 
-		$rdf .= "\t".'<rdf:subject rdf:resource="'.$t->subject()->toString.'" />'."\n";
-		$rdf .= "\t".'<rdf:predicate rdf:resource="'.$t->predicate()->toString.'" />'."\n";
-		my $object = $t->object();
+	# when here we do not have an index set :(
+	foreach( $_[0]->elements ) {
+		$rdf .= '<rdf:Statement rdf:ID="'.$_->getURI().'">'."\n";
+
+		$rdf .= "\t".'<rdf:subject rdf:resource="'.$_->subject()->toString.'" />'."\n";
+		$rdf .= "\t".'<rdf:predicate rdf:resource="'.$_->predicate()->toString.'" />'."\n";
+		my $object = $_->object();
 		# binary data is a still a problem. We might use MIME::Base64 or URI::data
 		if( (defined $object) && (ref($object)) && ($object->isa("RDFStore::Stanford::Literal")) ) {
-			my $s = $t->object()->toString;
+			my $s = $_->object()->toString;
 			$rdf .= "\t".'<rdf:object'.
 					( ($s =~ /[\&\<\>]/) ? ' xml:space="preserve"><![CDATA['.$s.']]>' : '>'.$s ).'</rdf:object>'."\n";
 		} else {
-			$rdf .= "\t".'<rdf:object rdf:resource="'.$t->object()->toString.'" />'."\n";
+			$rdf .= "\t".'<rdf:object rdf:resource="'.$_->object()->toString.'" />'."\n";
 		};
 
 		$rdf .= '</rdf:Statement>'."\n";
@@ -438,6 +534,94 @@ sub toStrawmanRDF {
 	$rdf .= '</rdf:RDF>';
 
 	return $rdf;
+};
+
+
+#Storage related part
+
+# NOTE: RDFStore::Literal and RDFStore::Resource generate the dame hashCode() for URI strings
+sub _getLookupValue {
+	my ($class) = shift;
+
+	return join('-', map { int($_) } @_);
+};
+
+sub _getValuesFromLookup {
+	my ($class) = shift;
+
+	return split('-',$_[0]);
+};
+
+# return a list of RDFNode objects for a given (sp), (po) or (so) couple
+sub fetchRDFNode {
+	my ($class,$s,$p,$o) = @_;
+
+	if(	(defined $s) &&
+		($s->isa("RDFStore::Stanford::Resource")) &&
+		(defined $p) &&
+		($p->isa("RDFStore::Stanford::Resource")) ) {
+		my $code = $class->_getLookupValue(scalar($s->hashCode()),scalar($p->hashCode()));
+		# Literals are one fetch away :)
+		return map {
+			if(	(defined $_) &&
+				(	(ref($_)) ||
+					( (s/^\"//) && (s/\"$//) ) ) ) {
+				$_ = $class->{nodeFactory}->createLiteral($_);
+			} elsif(	(defined $_) &&
+					(int($_)) ) {
+				$_ = $class->{resources}->{ $_ }; #FETCH
+				$_ = $class->{nodeFactory}->createResource($_)
+					if(defined $_);
+			} else {
+				return;
+			};
+		} $class->{sp2o_db}->get_dup( $code );
+	} elsif(	(defined $p) &&
+			($p->isa("RDFStore::Stanford::Resource")) &&
+			(defined $o) &&
+			($o->isa("RDFStore::Stanford::RDFNode")) ) {
+		my $code = $class->_getLookupValue(scalar($p->hashCode()),scalar($o->hashCode()));
+		return map {
+			if(	(defined $_) &&
+				(int($_)) ) {
+				$_ = $class->{resources}->{ $_ }; #FETCH
+				$_ = $class->{nodeFactory}->createResource($_)
+					if(defined $_);
+			} else {
+				return;
+			};
+		} $class->{po2s_db}->get_dup( $code );
+	} elsif(	(defined $s) &&
+			($s->isa("RDFStore::Stanford::Resource")) &&
+			(defined $o) &&
+			($o->isa("RDFStore::Stanford::RDFNode")) ) {
+		my $code = $class->_getLookupValue(scalar($s->hashCode()),scalar($o->hashCode()));
+		return map {
+			if(	(defined $_) &&
+				(int($_)) ) {
+				$_ = $class->{resources}->{ $_ }; #FETCH
+				$_ = $class->{nodeFactory}->createResource($_)
+					if(defined $_);
+			} else {
+				return;
+			};
+		} $class->{so2p_db}->get_dup( $code );
+	};
+};
+
+sub DESTROY {
+	my ($class) = shift;
+
+	undef $class->{resources_db};
+	untie %{$class->{resources}};
+	undef $class->{sp2o_db};
+	untie %{$class->{sp2o}};
+	undef $class->{po2s_db};
+	untie %{$class->{po2s}};
+	undef $class->{so2p_db};
+	untie %{$class->{so2p}};
+	undef $class->{result_db};
+	untie %{$class->{result}};
 };
 
 1;
@@ -452,19 +636,19 @@ RDFStore::Model - An implementation of the Model RDF API
 =head1 SYNOPSIS
 
 	use RDFStore::Model;
-	use RDFStore::NodeFactory;
 	use RDFStore::FindIndex;
+	use RDFStore::NodeFactory;
 	use Data::MagicTie;
 
 	my $factory= new RDFStore::NodeFactory();
 	my $statement = $factory->createStatement(
                         	$factory->createResource('http://perl.org'),
-                        	$factory->createResource('http://iscool.org/schema/1.0/#label'),
+                        	$factory->createResource('http://iscool.org/schema/1.0/','label'),
                         	$factory->createLiteral('Cool Web site')
                                 );
 	my $statement1 = $factory->createStatement(
 				$factory->createResource("http://www.altavista.com"),
-				$factory->createResource("http://pen.jrc.it/schema/1.0/#author"),
+				$factory->createResource("http://pen.jrc.it/schema/1.0/','author'),
 				$factory->createLiteral("Who? :-)")
 				);
 
@@ -474,10 +658,7 @@ RDFStore::Model - An implementation of the Model RDF API
 				$factory->createLiteral("")
 				);
 
-	my $index_db={};
-	tie %{$index_db},"Data::MagicTie",'index/triples',(Q => 20);
-	my $index=new RDFStore::FindIndex($index_db);
-	my $model = new RDFStore::Model($factory,undef,$index,undef);
+	my $model = new RDFStore::Model( Name => 'store', Split => 20 );
 
 	$model->add($statement);
 	$model->add($statement1);
@@ -488,18 +669,50 @@ RDFStore::Model - An implementation of the Model RDF API
 	print $model1->getDigest->hashCode;
 
 	my $found = $model->find($statement2->subject,undef,undef);
-	foreach (keys %{$found->elements}) {
+
+	#get Statements
+	foreach ( $found->elements ) {
+        	print $_->getLabel(),"\n";
+	};
+
+	#get RDFNodes
+	foreach ( keys %{$found->elements}) {
         	print $found->elements->{$_}->getLabel(),"\n";
 	};
 
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::Model implementation using Digested URIs and Perl hashes to store triplets. The actual store could be tied to a Data::MagicTie(3) hash/array and the RDFStore::FindIndex(3) module.
+An RDFStore::Stanford::Model implementation using Data::MagicTie tied arrays and hashes to store triplets. The actual store could be tied either to an in-memory, a local or remote database - see Data::MagicTie(3).
+
+This modules implements a storage and iterator by leveraging on perltie(3) and the Data::MagicTie(3) interface.
+
+=head1 CONSTRUCTORS
+ 
+The following methods construct/tie RDFStore::Model storages and objects:
+
+=item $model = new RDFStore::Model( %whateveryoulikeit );
+ 
+Create an new RDFStore::Model object and tie up a serie of Data::MagicTie hash databases to read/write/query RDFStore::RDFNode. The %whateveryoulikeit hash contains a set of configuration options about how and where store actual data. Most of the options correspond to the Data::MagicTie ones - see Data::MagicTie(3)
+Possible additional options are the following:
+ 
+=over 4
+ 
+=item Name
+ 
+This is a label used to identify a B<Persistent> storage by name. It might correspond to a physical file system directory containing the indexes DBs. By default if no B<Name> option is given the storage is assumed to be B<in-memory> (e.g. RDFStore::Storage::find method return result sets as in-memory models by default unless specified differently). For local persistent storages a directory named liek this option is created in the current working directory with mode 0666)
+
+=item Sync
+
+Sync the RDFStore::Model with the underling Data::MagciTie GDS after each add() or remove().
+
+=item Resources, Index1, Index2 and Index3
+
+These parameters point to the Data::MagicTie options of the underlying database.
 
 =head1 SEE ALSO
 
-Data::MagicTie(3) Digest(3) RDFStore::Stanford::Digest(3) RDFStore::RDFNode RDFStore::Resource RDFStore::FindIndex(3)
+Data::MagicTie(3) Digest(3) RDFStore::Stanford::Digest::Digestable(3) RDFStore::Stanford::Digest(3) RDFStore::RDFNode RDFStore::Resource RDFStore::FindIndex(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>

@@ -1,9 +1,8 @@
 /* DBMS Server
- * $Id: handler.c,v 1.7 1999/01/04 22:31:56 dirkx Exp $
+ * $Id: handler.c,v 1.2 2001/06/18 15:26:18 reggiori Exp $
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * (c) 1998 Web Weaving Internet Engineering
+ *     Dirk-Willem van Gulik / dirkx@webweaving.org
  *
  * based on UKDCils
  *
@@ -20,6 +19,7 @@
 #include <string.h>
 #include <signal.h>
 
+/*#include <sys/syslimits.h>*/
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/file.h>
@@ -30,7 +30,11 @@
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#ifdef BSD
 #include <db.h>
+#else
+#include <db_185.h>
+#endif
 
 #include "dbms.h"
 #include "dbmsd.h"
@@ -38,6 +42,7 @@
 #include "deamon.h"
 #include "mymalloc.h"
 #include "handler.h"
+#include "children.h"
 #include "pathmake.h"
 
 dbase                 * first_dbp = NULL;
@@ -46,6 +51,10 @@ char * iprt( DBT * r ) {
         static char tmp[ 128 ]; int i;
 	if (r==NULL)
 		return "<null>";
+	if (r->data==NULL)
+		return "<null ptr>";
+	if (r->size < 0 || r->size > 1024*1024)
+		return "<weird size>";
 
         for(i=0;i< ( r->size > 127 ? 127 : r->size);i++) {
 		int c= ((char *)(r->data))[i];
@@ -72,12 +81,16 @@ char * eptr( int i ) {
 		return "Fail ";
 	}
 
+#ifdef STATIC_BUFF
+static dbase * free_dbase_list = NULL;
+#endif
+static int dbase_counter = 0;
+
 void
 free_dbs(
 	dbase * q
 	)
 {
-	log(L_VERBOSE,"Freeing DB %20s",q->name);
 	if (q->handle) {
 	   if ((q->handle->sync)(q->handle,0)) 
 		log(L_ERROR,"Sync(%s) returned an error prior to close",
@@ -86,9 +99,16 @@ free_dbs(
 		log(L_ERROR,"Sync(%s) returned an error prior to close",
 			q->name); 
 	}
+#ifndef STATIC_BUFF
         if (q->pfile) myfree(q->pfile);
         if (q->name) myfree(q->name);
         myfree(q);
+#else
+	/* pre-fix into free DBS list */
+	q->nxt = free_dbase_list;
+	free_dbase_list = q;	
+#endif
+	dbase_counter --;
         };
 
 void
@@ -98,6 +118,10 @@ zap_dbs (
 {
 	dbase * * p;
 	connection * s;
+
+	/* XXX we do not want this ?! before we 
+	 * know it we end up in n**2 land
+	 */
         for ( p = &first_dbp; *p && *p != r; )
                 p = &((*p)->nxt);
 
@@ -111,8 +135,7 @@ zap_dbs (
 	 */
 	for(s=client_list; s;s=s->next) 
 		if (s->dbp == r) {
-                	log(L_DEBUG,"Marked a db %d to close",s->clientfd);
-			s->close = 1;
+			s->close = 1; MX;
 			};
         *p = r->nxt;
         free_dbs(r);
@@ -121,12 +144,11 @@ zap_dbs (
 
 void close_all_dbps() {
 	dbase * p;
-	log(L_INFORM,"Closing all dbs-es");
 
         for(p=first_dbp; p;) {
                 dbase * q;
                 q = p; p=p->nxt;
-		free_dbs( q );
+		free_dbs( q ); /* XXXX why am I not just calling ZAP ? */
 		};
 	first_dbp=NULL;
 	}
@@ -156,34 +178,49 @@ int open_dbp( dbase * p ) {
         p->handle = 
 		dbopen( p->pfile, O_RDWR | p->mode, 0666, DB_HASH, NULL);
 
-	log(L_VERBOSE,"dbopen on %s - %s %p",p->pfile,
-		(p->handle != NULL) ? "ok" : "FAILed",
-		p->handle
-		);
-
         return (p->handle != NULL) ? 0 : errno;
         }
+
 
 dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
         dbase * p;
 	char * pfile;
 
+	/* XXX this should be a HASH ! 
+	 */
         for ( p = first_dbp; p; p=p->nxt) 	
 		if ( (p->sname == v2->size) &&
                     (bcmp(p->name,v2->data,p->sname)==0) &&
 		    (strcmp( r->my_dir, p->my_dir )==0)
                 ) return p;
 
-        p = mymalloc(sizeof(dbase));
-        if (p == NULL) {
+	if (dbase_counter > HARD_MAX_DBASE) {
+                log(L_ERROR,"Hard max number of dabases hit. (bug?)");
+                return NULL;
+                };
+
+#ifdef STATIC_BUFF
+	if ((p = free_dbase_list) == NULL)
+#endif
+        if ((p = mymalloc(sizeof(dbase))) == NULL) {
                 log(L_ERROR,"No Memory (for another dbase 1)");
                 return NULL;
                 };
 
+#ifdef STATIC_BUFF
+	free_dbase_list = p->nxt;
+#endif
         p->nxt = first_dbp;
         first_dbp = p;
+	dbase_counter ++;
 
-	p->name = p->pfile = NULL;
+#ifndef STATIC_BUFF
+	p->name = NULL;
+	p->pfile = NULL;
+#else
+  p->name[0] ='\0';
+	p->pfile[0] = '\0';
+#endif
 	p->num_cls = 0;
 	p->close = 0;
 	p->mode = mode;
@@ -195,7 +232,12 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 	p->handled_by = NULL;
 #endif
 
-        if ((p->name = mymalloc( 1+v2->size ))==NULL) {
+#ifdef STATIC_BUFF
+	if ( 1+ v2->size > MAX_STATIC_NAME ) 
+#else
+   if ((p->name = mymalloc( 1+v2->size ))==NULL) 
+#endif
+	{
                 log(L_ERROR,"No Memory (for another dbase 2)");
 		goto clean_and_exit;
                 };
@@ -206,11 +248,16 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 	if (!(pfile= mkpath(p->my_dir,p->name)))
 		goto clean_and_exit;
 
-        p->pfile = memdup( pfile, strlen(pfile)+1 );
-        if ( p->pfile == NULL ) {
+#ifdef STATIC_BUFF
+	if ( strlen(pfile)+1 > MAX_STATIC_PFILE ) 
+#else
+   if ((p->pfile = mymalloc(strlen(pfile)+1)) == NULL )
+#endif
+	{ 
                 log(L_ERROR,"No Memory (for another dbase 3)");
 		goto clean_and_exit;
                 };
+	strcpy(p->pfile,pfile);
 
 	/* if you do NOT want it created, it MUST exist, otherwise
 	 * we send back an error...
@@ -229,65 +276,60 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 	 * if we are the 'child' then do the
 	 * actual work..
 	 */
-	if ( mum_pid == getpid() ) {
-		int mdbs=0,c;
+	if (!mum_pid) {
+		int mdbs=0,c=0;
 		struct child_rec * q, *best;
+
 		/* count # of processes and get the least
-		 * loaded one of the lot.
+		 * loaded one of the lot. Or create a
+		 * fresh one. XXXX We could also go for 
+		 * a rotational approach, modulo the counter.
+		 * that would remove the need to loop, but
+		 * spoil the load distribution.
 		 */
-		if (children) {
-			for(c=0,q=children; q; q=q->nxt,c++)
-				if ( mdbs==0 || q->num_dbs < mdbs ) {
+		if (child_counter < max_processes) {
+		  	q=create_new_child();
+			/* fork/child or error */
+		  	if ((q == NULL) && (errno))
+				goto clean_and_exit;
+			if (q == NULL)
+				return NULL; /* just bail out if we are the child */
+		  	best=q;
+			}
+		else {
+			for(c=0,q=children; q; q=q->nxt)
+				if ( mdbs == 0 || q->num_dbs < mdbs ) {
 					mdbs = q->num_dbs;
 					best = q;
 					};
-			}
-		else
-			mdbs = c = 0;	/* nothing there yet.. */
-
-		if (c < max_processes ) {
-		   	/* if possible, try to create a new one
-		   	 */
-		  	 q=create_new_child();
-		  	 if ((q == NULL) && (errno)) 
-				goto clean_and_exit;
-		  	 best=q;
 			};
 
-		/* we are the child, take out the child */	
-		if (best == NULL)  {
-			errno=0;
-			goto clean_and_exit;
-			};
-
-		log(L_INFORM,"Returning as a normal mum");
 		p->handled_by = best;
 		p->handled_by->num_dbs ++;
 		return p;	
-		}
-	else {
-		/* we are a child... just open normal. 
-		 */
-		log(L_DEBUG,"As a child, we just open the DB as normal");	
-	}
+		}; /* if mother */
+	/* we are a child... just open normal. 
+	 */
 #endif
-        if (open_dbp( p ) == 0) {
-		log(L_VERBOSE,"Opened %s %p %d",
-			p->name,
-			p->handle,(p->handle->fd)(p->handle));
+        if (open_dbp( p ) == 0) 
 		return p;
-		};
 
-	log(L_VERBOSE,"Open1 %s failed: %s",p->pfile,strerror(errno));
+	log(L_ERROR,"Open1 %s failed: %s",p->pfile,strerror(errno));
 
 clean_and_exit:
-	log(L_VERBOSE,"Clean and exit\n");
-	p->close = 1;
-/*
-	if (p->pfile) free(p->pfile);
-	if (p->name) free(p->name);
-	if (p) free(p);
-*/
+	p->close = 1; MX;
+
+	/* repair... and shuffle... */
+        first_dbp = p->nxt;
+#ifndef STATIC_BUFF
+	if (p->pfile) myfree(p->pfile);
+	if (p->name) myfree(p->name);
+	if (p) myfree(p);
+#else
+	p->nxt = free_dbase_list;
+	free_dbase_list = p;
+#endif
+	dbase_counter --;
 	return NULL;
         }
 
@@ -301,14 +343,8 @@ void do_init( connection * r) {
 
 	mode =htonl( ((u_long *)(r->v1.data))[1] );
 
-	log(L_INFORM,"INIT %s mode %d",iprt(&(r->v2)),mode);
-	trace("INIT %s mode %d",iprt(&(r->v2)));	
-
 #ifdef FORKING
-	if (mum_pid != getpid()) {
-		log(L_ERROR,"As a child I should get no INITs");
-		return;
-		};
+	assert(mum_pid==0);
 #endif
 	if (r->v1.size == 0) {
 		reply_log(r,L_ERROR,"No protocol version");
@@ -325,7 +361,7 @@ void do_init( connection * r) {
 	/* work out wether we have this dbase already open, 
 	 * and open it if ness. 
 	 */
-	r->dbp = get_dbp( r, mode, &(r->v2));
+	r->dbp = get_dbp( r, mode, &(r->v2)); /* returns NULL on error or if it is a child */
 
 	if (r->dbp == NULL) {
 		if (errno == ENOENT) {
@@ -334,7 +370,7 @@ void do_init( connection * r) {
 			return;
 			};
 #ifdef FORKING
-		if (mum_pid == getpid())
+		if (!mum_pid)
 #endif
 			reply_log(r,L_ERROR,"Open2 database '%s' failed: %s",
 				iprt(&(r->v2)),strerror(errno));
@@ -368,30 +404,26 @@ void do_pass( connection * mums_r) {
 	u_long proto,mode;
 	DBT val;
 
-	/* is it a confirm,or the real thing ? 
-	 */
-	if( mum_pid == getpid()) {
-		log(L_FATAL,"Mother should not get passes");
-		return;
-		};
+	assert(mum_pid);
 
 	if ((newfd=takeon_fd(mum_fd))<0) {
 		reply_log(mums_r,L_ERROR,"Take on failed: %s",
 			strerror(errno));
 		/* give up on the connection to mum ?*/
-		mums_r->close = 1;
+		mums_r->close = 1; MX;
 		return;
 		};
 
 	/* try to take this FD on board.. and let it do
 	 * whatever error moaning itself.
 	 */
-	r = handle_new_connection( newfd, C_CLIENT);
-
 	proto =((u_long *)(mums_r->v1.data))[0];
 	mode = htonl(((u_long *)(mums_r->v1.data))[1]);
 
-	log(L_INFORM,"PASS %s mode %d",iprt(&(r->v2)),mode);
+	log(L_INFORM,"PASS db='%s' mode %d",iprt(&(mums_r->v2)),mode);
+
+	if ((r = handle_new_connection( newfd, C_CLIENT)) == NULL)
+		return;
 
 	/* is this the sort of init data we can handle ? 
 	 */
@@ -400,13 +432,12 @@ void do_pass( connection * mums_r) {
 		return;
 		};
 
-
 	r->dbp = get_dbp( r, mode, &(mums_r->v2));
 
 	if (r->dbp== NULL) {
 		if (errno == ENOENT) {
 			dispatch(r, TOKEN_INIT | F_NOTFOUND,&val,NULL);
-			r->close = 1;
+			r->close = 1; MX;
 			return;
 			};
 		reply_log(r,L_ERROR,"Open database %s failed: %s",
@@ -421,7 +452,10 @@ void do_pass( connection * mums_r) {
 	proto=htonl(DBMS_PROTO);
 	val.data= &proto;
 	val.size = sizeof( u_long );
+
 	dispatch(r, TOKEN_INIT | F_FOUND,&val,NULL);
+
+	log(L_INFORM,"PASS send init repy on %d to client",r->clientfd);
 	return;
 	};
 #endif
@@ -439,22 +473,7 @@ void do_fetch( connection * r) {
 	key.size = r->v1.size;
 
 
-	log(L_BLOAT,"%6s %20s: %d %s %p","FETCH",
-		r->dbp->name, r->clientfd,
-		iprt(&(r->v1)),r->dbp->handle);
-
-{ int s,now=time(NULL);
 	err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
-if ((s=difftime(time(NULL),now))>2)
-fprintf(stderr,"Too long %d\n",s);
-};
-	log(L_BLOAT,"%6s %20s: %s %s","FETCH",
-		r->dbp->name,iprt( err==0 ? &val : NULL ),eptr(err));
-	log(L_DEBUG,"Done with fetch %d\n",time(NULL));
-
-	trace("%6s %s %s %s %s","FETCH",
-		r->dbp->name, iprt(&key), 
-		iprt( err==0 ? &val : NULL ),eptr(err));
 
 	if (err == 0) 
 		dispatch(r,TOKEN_FETCH | F_FOUND,&key,&val);
@@ -470,7 +489,7 @@ void do_inc ( connection * r) {
 	int err;
 	unsigned long l;
 	char * p;
-	char outbuf[256]; /* XXXX surely shorter than UMAX_LONG */
+	char outbuf[256]; /* surely shorter than UMAX_LONG */
 
 	if (r->type != C_CLIENT) {
 		log(L_ERROR,"Command received from non-client command FETCH");
@@ -483,18 +502,7 @@ void do_inc ( connection * r) {
 	key.data = r->v1.data;
 	key.size = r->v1.size;
 
-	log(L_BLOAT,"%6s %20s: %d %s %p","INCR",
-		r->dbp->name, r->clientfd,
-		iprt(&(r->v1)),r->dbp->handle
-		);
-
 	err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
-
-	trace("%6s %s %s %s %s","INCR",
-		r->dbp->name, iprt(&key), 
-		iprt( (err==0) ? &val : NULL ),
-		eptr(err)
-		);
 
 	if ((err == 1) || (val.size == 0)) {
                 dispatch(r,TOKEN_INC | F_NOTFOUND,NULL,NULL);
@@ -508,9 +516,9 @@ void do_inc ( connection * r) {
 		};
 
 	/* XXX bit of a hack; but perl seems to deal with
-	 *     all storage as ascii strings in some un-
-	 *     specified locale.
-	 */
+         *     all storage as ascii strings in some un-
+         *     specified locale.
+         */
 	bzero(outbuf,256);
 	strncpy(outbuf,val.data,MIN( val.size, 255 ));
 	l=strtoul( outbuf, &p, 10 );
@@ -521,7 +529,6 @@ void do_inc ( connection * r) {
 			);
 		return;
 		};
-
 	/* this is where it all happens... */
 	l++;
 
@@ -538,18 +545,9 @@ void do_inc ( connection * r) {
 	 */
         err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
 
-	log(L_BLOAT,"%6s %20s: %s %s","INCS",
-		r->dbp->name,
-		iprt(&(r->v1)), eptr(err) );
-
-	trace("%6s %12s %20s: %s %s","INCS",
-		r->dbp->name, iprt(&key), 
-		iprt( err==0 ? &val : NULL ),
-		eptr(err));
-
-	/* and just send the updated value back as an ascii string
+	/* just send it back as an ascii string
 	 */
-	if ((err == 0)  || (err == 1)) 
+	if (( err == 0 ) || ( err == 1 ))
                 dispatch(r,TOKEN_INC | F_FOUND,NULL,&val);
         else
 		reply_log(r,L_ERROR,"inc store on %s failed: %s",
@@ -569,11 +567,6 @@ void do_exists( connection * r) {
         key.size = r->v1.size;
 
         err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
-
-	log(L_BLOAT,"%6s %20s: %s %s","EXIST",r->dbp->name,iprt(&(r->v1)),eptr(err));
-	trace("%6s %12s %20s: %s %s","EXIST",
-		r->dbp->name, iprt(&key), 
-		iprt( err==0 ? &val : NULL ),eptr(err));
 
         if ( err == 0 )
 		dispatch(r,TOKEN_EXISTS | F_FOUND,NULL,NULL);
@@ -597,10 +590,6 @@ void do_delete( connection * r) {
         key.size = r->v1.size;
 
         err=(r->dbp->handle->del)( r->dbp->handle, &key,0);
-
-	log(L_BLOAT,"%6s %20s: %s %s","DELETE",r->dbp->name,iprt(&(r->v1)),eptr(err));
-	trace("%6s %12s %20s: %s","DELETE",
-		r->dbp->name, iprt(&key),eptr(err));
 
        if ( err == 0 )
                 dispatch(r,TOKEN_DELETE | F_FOUND,NULL,NULL);
@@ -628,11 +617,6 @@ void do_store( connection * r) {
 
         err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
 
-	log(L_BLOAT,"%6s %20s: %s %s","STORE",r->dbp->name,iprt(&(r->v1)),eptr(err));
-	trace("%6s %12s %20s: %s %s","STORE",
-		r->dbp->name, iprt(&key), 
-		iprt( err==0 ? &val : NULL ),eptr(err));
-
 	if ( err == 0 )
                 dispatch(r,TOKEN_STORE | F_NOTFOUND,NULL,NULL);
         else
@@ -653,10 +637,6 @@ void do_sync( connection * r) {
 
         err=(r->dbp->handle->sync)( r->dbp->handle,0);
 
-	log(L_BLOAT,"%6s %20s: %s","SYNC",r->dbp->name,eptr(err));
-
-	trace("%6s %12s %s","SYNC",r->dbp->name,eptr(err));
-
         if (err < 0 ) {
 		reply_log(r,L_ERROR,"sync on %s failed: %s",r->dbp->name,strerror(errno));
                 }
@@ -672,8 +652,6 @@ void do_clear( connection * r) {
 		log(L_ERROR,"Command received from non-client command CLEAR");
 		return;
 		};
-
-	log(L_BLOAT,"%6s %20s:","CLEAR",r->dbp->name);
 
 	/* close the database, remove the file, and repoen... ? */	
 	if ( ((err=(r->dbp->handle->close)( r->dbp->handle)) < 0 ) ||
@@ -727,12 +705,6 @@ void do_list( connection * r) {
 
 void do_ping( connection * r) {
 
-	if (mum_pid == getpid()) {
-		log(L_INFORM,"%6s %20s","PING","Ping acknowledged.");
-		return;
-		}
-
-	log(L_INFORM,"%6s %20s","PING","Sending ping ack.");
         dispatch(r,TOKEN_PING | F_FOUND,NULL,NULL);
 	}
 
@@ -743,11 +715,8 @@ void do_close( connection * r) {
 		return;
 		};
 
-	log(L_INFORM,"%6s %20s","CLOSE",r->dbp->name);
-	trace("%6s %12s","CLOSE",r->dbp->name);
-
         dispatch(r,TOKEN_CLOSE,NULL,NULL);
-	r->close = 1;
+	r->close = 1; MX;
 	}
 
 void do_first( connection * r) {
@@ -763,12 +732,6 @@ void do_first( connection * r) {
 	r->dbp->lastfd = r->clientfd;
 
         err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_FIRST);
-
-	log(L_BLOAT,"%6s %20s: %s","FIRST",eptr(err));
-
-	trace("%6s %12s %20s: %s %s","FIRST",
-		r->dbp->name, iprt(&key), 
-		iprt( err==0 ? &val : NULL ),eptr(err));
 
 	if ( err == 1 )
                 dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
@@ -789,7 +752,6 @@ void do_next( connection * r) {
 		return;
 		};
 
-	log(L_BLOAT,"%6s %20s: %s %s","NEXT",iprt(&(r->v1)),eptr(err));
 	/* We need to set the cursor first, if we where 
 	 * not the last using it. 
 	 */
@@ -835,37 +797,43 @@ void do_next( connection * r) {
 		};
         };
 
-struct command_req cmd_table[] = {
-	{ TOKEN_INIT,		"INIT", 0, &do_init },
-#ifdef FORKING
-	{ TOKEN_FDPASS,		"PASS", 0, &do_pass },
-#endif
-	{ TOKEN_FETCH,		"FTCH", 0, &do_fetch },
-	{ TOKEN_STORE,		"STRE", 0, &do_store },
-	{ TOKEN_DELETE,		"DELE", 0, &do_delete },
-	{ TOKEN_CLOSE,		"CLSE", 0, &do_close },
-	{ TOKEN_NEXTKEY,	"NEXT", 0, &do_next },
-	{ TOKEN_FIRSTKEY,	"FRST", 0, &do_first },
-	{ TOKEN_EXISTS,		"EXST", 0, &do_exists },
-	{ TOKEN_SYNC,		"SYNC", 0, &do_sync },
-	{ TOKEN_CLEAR,		"CLRS", 0, &do_clear },
-	{ TOKEN_PING,		"CLRS", 0, &do_ping },
-	{ TOKEN_INC,		"INCR", 0, &do_inc },
-	{ TOKEN_LIST,		"LIST", 0, &do_list},
-	};
-	
-void parse_request( connection * r) {
+struct command_req cmd_table[ TOKEN_MAX ];
+#define IT(i,s,f) { cmd_table[i].cnt = 0; cmd_table[i].cmd = i; cmd_table[i].info = s; cmd_table[i].handler = f; }
+void init_cmd_table( void )
+{
 	int i;
-	log(L_DEBUG,"Incoming request on fd=%d",r->clientfd);
-	for(i=0; i < sizeof(cmd_table) / sizeof(struct command_req); i++) {
-		if ( cmd_table[i].cmd == r->cmd.token ) {
-			cmd_table[i].cnt++;
-			(cmd_table[i].handler)(r);
-			return;
-			};
+	for(i=0;i<TOKEN_MAX;i++) 
+		IT( i, "VOID",NULL );
+
+	IT( TOKEN_INIT,	"INIT",&do_init);
+	IT( TOKEN_FETCH,"FTCH",&do_fetch);
+	IT( TOKEN_STORE,"STRE",&do_store);
+	IT( TOKEN_DELETE,"DELE",&do_delete);
+	IT( TOKEN_CLOSE,"CLSE",&do_close);
+	IT( TOKEN_NEXTKEY,"NEXT",&do_next);
+	IT( TOKEN_FIRSTKEY,"FRST",&do_first);
+	IT( TOKEN_EXISTS,"EXST",&do_exists);
+	IT( TOKEN_SYNC,	"SYNC",&do_sync);
+	IT( TOKEN_CLEAR,"CLRS",&do_clear);
+	IT( TOKEN_PING,"CLRS",&do_ping);
+	IT( TOKEN_INC,"INCR",&do_inc);
+	IT( TOKEN_LIST,"LIST",&do_list);
+#ifdef FORKING
+	IT( TOKEN_FDPASS,"PASS",&do_pass);
+#endif
+}
+
+void parse_request( connection * r) {
+	register int i = r->cmd.token;
+
+	if ( i>=0 && i<= TOKEN_MAX && cmd_table[i].handler) {
+		cmd_table[i].cnt++;
+		(cmd_table[i].handler)(r);
+		return;
 		}
-	reply_log(r,L_ERROR,"Received Command %d (%s,%s) not understood",
-		r->cmd.token,iprt(&(r->v1)),iprt(&(r->v2)) );
-	r->close = 1;
+
+	reply_log(r,L_ERROR,"Unkown command token %d",i);
+	r->close = 1; MX;
 	return;
 	}
+

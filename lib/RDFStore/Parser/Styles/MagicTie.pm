@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -19,43 +18,27 @@
 # *		- fixed bug in Assert() checking if $st is a ref and valid RDFStore::Stanford::Statement
 # *     version 0.31
 # *		- updated documentation
+# *     version 0.4
+# *		- modified Assert() to print only new statements
+# *		- fixed a few warnings
+# *		- updated accordingly to new RDFStore::Model
 # *
 
 package RDFStore::Parser::Styles::MagicTie;
 {
+use strict;
 use RDFStore::SetModel;
-use RDFStore::FindIndex;
-use Data::MagicTie; #see documentation
 use Carp;
 
 sub Init {
     my $expat = shift;
 
-	# TIE triple database
-        my $store_dir=((exists $expat->{store}) && (exists $expat->{store}->{directory})) ?
-			$expat->{store}->{directory} : 
-			undef;
-
-	$expat->{triples} = {};
-	$expat->{triples_index} = {};
-	if (	(exists $expat->{store}->{persistent}) && 
-		($expat->{store}->{persistent}==1) ) {
-		$expat->{triples_db} = tie %{$expat->{triples}},
-				'Data::MagicTie',
-				$store_dir.'rdf/triples',(%{$expat->{store}->{options}})
-			or croak "Cannot tie 'triples' database ($!)\n";
-		$expat->{triples_index_db} = tie %{$expat->{triples_index}},
-				'Data::MagicTie',
-				$store_dir.'rdf/index',(%{$expat->{store}->{options}})
-			or croak "Cannot tie 'triples index' database ($!)\n";
-	};
-
-	my $index = new RDFStore::FindIndex($expat->{triples_index});
-	$expat->{RDFStore_model} = new RDFStore::SetModel(
-					$expat->{PenRDF}->{nodeFactory},	
-					$expat->{triples},$index,undef); 
+	$expat->{RDFStore_model} = new RDFStore::SetModel( 
+					nodeFactory => $expat->{PenRDF}->{nodeFactory}, 
+					%{$expat->{store}->{options}} );
 	$expat->{RDFStore_model}->setSourceURI($expat->{Source})
-		if( (exists $expat->{Source}) && (defined $expat->{Source}) );
+		if(	(exists $expat->{Source}) && 
+			(defined $expat->{Source}) );
 };
 
 sub Final {
@@ -72,10 +55,19 @@ sub Final {
 sub Assert {
 	my ($expat,$st) = @_;
 
-	print $st->toString,"\n"
-		if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Stanford::Statement")) && (defined $expat->{store}->{seevalues}) );
+	#if($expat->{RDFStore_model}->add($st)) {
+	#	print $st->toString,"\n"
+	#		if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Stanford::Statement")) && (defined $expat->{store}->{seevalues}) );
+	#};
 
-	$expat->{RDFStore_model}->add($st);
+	# we should print just the new ones
+	print $st->toString,"\n"
+                if(	(defined $st) && 
+			(ref($st)) && 
+			($st->isa("RDFStore::Stanford::Statement")) && 
+			(defined $expat->{store}->{seevalues}) );
+
+        $expat->{RDFStore_model}->add($st);
 };
 
 # we might use this callback for XSLT tansofrmations of xml-blobs :)
@@ -176,8 +168,8 @@ None known yet
 
 =head1 SEE ALSO
 
-RDFStore::Parser::SiRPAC(3), Data::MagicTie(3) RDFStore(3) DBMS(3)
+RDFStore::Parser::SiRPAC(3), RDFStore(3), RDFStore::Model(3) Data::MagicTie(3) DBMS(3)
 
 =head1 AUTHOR
 
-Alberto Reggiori <alberto.reggiori@jrc.it>
+Alberto Reggiori <areggiori@webweaving.org>

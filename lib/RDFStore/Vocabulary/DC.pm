@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *     Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,12 +7,15 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 
 package DC;
 {
+use vars qw ( $VERSION $contributor $description $creator $date $coverage $rights $subject $title $type $source $relation $language $format $identifier $publisher );
+$VERSION='0.4';
+use strict;
 use RDFStore::Model;
 use Carp;
 
@@ -24,8 +26,7 @@ use Carp;
 #
 
 # Namespace URI of this schema
-
-$_Namespace= "http://purl.org/dc/elements/1.1/";
+$DC::_Namespace= "http://dublincore.org/2000/03/13-dces#";
 use RDFStore::NodeFactory;
 &setNodeFactory(new RDFStore::NodeFactory());
 
@@ -34,60 +35,42 @@ sub createResource {
 		unless( (defined $_[0]) &&
                 	( (ref($_[0])) && ($_[0]->isa("RDFStore::Stanford::NodeFactory")) ) );
 
-	return $_[0]->createResource($_Namespace,$_[1]);
+	return $_[0]->createResource($DC::_Namespace,$_[1]);
 };
 sub setNodeFactory {
 	croak "Factory ".$_[0]." is not an instance of RDFStore::Stanford::NodeFactory"
 		unless( (defined $_[0]) &&
                 	( (ref($_[0])) && ($_[0]->isa("RDFStore::Stanford::NodeFactory")) ) );
-	# The language of the intellectual content of the   resource. Where practical, the content of this field should coincide   with RFC 1766 [Tags for the Identification of Languages,   http://ds.internic.net/rfc/rfc1766.txt ]; examples include en, de,   es, fi, fr, ja, th, and zh.
-	$Language = createResource($_[0], "Language");
-	# The name given to the resource, usually by the Creator   or Publisher.
-	$Title = createResource($_[0], "Title");
-	# A rights management statement, an identifier that   links to a rights management statement, or an identifier that links   to a service providing information about rights management for the   resource.
-	$Rights = createResource($_[0], "Rights");
-	# An identifier of a second resource and its   relationship to the present resource. This element permits links   between related resources and resource descriptions to be   indicated. Examples include an edition of a work (IsVersionOf), a   translation of a work (IsBasedOn), a chapter of a book (IsPartOf),   and a mechanical transformation of a dataset into an image   (IsFormatOf). For the sake of interoperability, relationships should   be selected from an enumerated list that is currently under   development in the workshop series.
-	$Relation = createResource($_[0], "Relation");
-	#  A textual description of the content of the resource,   including abstracts in the case of document-like objects or content   descriptions in the case of visual resources.
-	$Description = createResource($_[0], "Description");
-	# A date associated with the creation or availability of   the resource. Such a date is not to be confused with one belonging   in the Coverage element, which would be associated with the resource   only insofar as the intellectual content is somehow about that   date. Recommended best practice is defined in a profile of ISO 8601   [Date and Time Formats (based on ISO8601), W3C Technical Note,   http://www.w3.org/TR/NOTE-datetime] that includes (among others)   dates of the forms YYYY and YYYY-MM-DD. In this scheme, for example,   the date 1994-11-05 corresponds to November 5, 1994.
-	$Date = createResource($_[0], "Date");
-	# Information about a second resource from which the   present resource is derived. While it is generally recommended that   elements contain information about the present resource only, this   element may contain a date, creator, format, identifier, or other   metadata for the second resource when it is considered important for   discovery of the present resource; recommended best practice is to   use the Relation element instead.  For example, it is possible to   use a Source date of 1603 in a description of a 1996 film adaptation   of a Shakespearean play, but it is preferred instead to use Relation   "IsBasedOn" with a reference to a separate resource whose   description contains a Date of 1603. Source is not applicable if the   present resource is in its original form.
-	$Source = createResource($_[0], "Source");
-	# A string or number used to uniquely identify the   resource. Examples for networked resources include URLs and URNs   (when implemented). Other globally-unique identifiers, such as   International Standard Book Numbers (ISBN) or other formal names are   also candidates for this element.
-	$Identifier = createResource($_[0], "Identifier");
-	# The person or organization primarily responsible for   creating the intellectual content of the resource. For example,   authors in the case of written documents, artists, photographers, or   illustrators in the case of visual resources.
-	$Creator = createResource($_[0], "Creator");
-	# The topic of the resource. Typically, subject will be   expressed as keywords or phrases that describe the subject or   content of the resource. The use of controlled vocabularies and   formal classification schemes is encouraged.
-	$Subject = createResource($_[0], "Subject");
-	# The category of the resource, such as home page,   novel, poem, working paper, technical report, essay, dictionary. For   the sake of interoperability, Type should be selected from an   enumerated list that is currently under development in the workshop   series.
-	$Type = createResource($_[0], "Type");
-	# The entity responsible for making the resource   available in its present form, such as a publishing house, a   university department, or a corporate entity.
-	$Publisher = createResource($_[0], "Publisher");
-	# The spatial or temporal characteristics of the   intellectual content of the resource. Spatial coverage refers to a   physical region (e.g., celestial sector); use coordinates (e.g.,   longitude and latitude) or place names that are from a controlled   list or are fully spelled out. Temporal coverage refers to what the   resource is about rather than when it was created or made available   (the latter belonging in the Date element); use the same date/time   format (often a range) [Date and Time Formats (based on ISO8601),   W3C Technical Note, http://www.w3.org/TR/NOTE-datetime] as   recommended for the Date element or time periods that are from a   controlled list or are fully spelled out.
-	$Coverage = createResource($_[0], "Coverage");
-	# The data format of the resource, used to identify the   software and possibly hardware that might be needed to display or   operate the resource. For the sake of interoperability, Format   should be selected from an enumerated list that is currently under   development in the workshop series.
-	$Format = createResource($_[0], "Format");
-	# A person or organization not specified in a Creator   element who has made significant intellectual contributions to the   resource but whose contribution is secondary to any person or   organization specified in a Creator element (for example, editor,   transcriber, and illustrator).
-	$Contributor = createResource($_[0], "Contributor");
+	# An entity responsible for making contributions to the  content of the resource.
+	$DC::contributor = createResource($_[0], "contributor");
+	# An account of the content of the resource.
+	$DC::description = createResource($_[0], "description");
+	# An entity primarily responsible for making the content  of the resource.
+	$DC::creator = createResource($_[0], "creator");
+	# A date associated with an event in the life cycle of  the resource.
+	$DC::date = createResource($_[0], "date");
+	#  The extent or scope of the content of the  resource.
+	$DC::coverage = createResource($_[0], "coverage");
+	#  Information about rights held in and over the  resource.
+	$DC::rights = createResource($_[0], "rights");
+	# The topic of the content of the resource.
+	$DC::subject = createResource($_[0], "subject");
+	# A name given to the resource.
+	$DC::title = createResource($_[0], "title");
+	# The nature or genre of the content of the  resource.
+	$DC::type = createResource($_[0], "type");
+	# A Reference to a resource from which the present  resource is derived.
+	$DC::source = createResource($_[0], "source");
+	#  A reference to a related resource.
+	$DC::relation = createResource($_[0], "relation");
+	#  A language of the intellectual content of the  resource.
+	$DC::language = createResource($_[0], "language");
+	# The physical or digital manifestation of the  resource.
+	$DC::format = createResource($_[0], "format");
+	# An unambiguous reference to the resource within a  given context.
+	$DC::identifier = createResource($_[0], "identifier");
+	# An entity responsible for making the resource  available.
+	$DC::publisher = createResource($_[0], "publisher");
 };
 1;
 };
-
-__END__
-
-=head1 NAME 
-	RDFStore::Vocabulary::DC
-
-=head1 SYNOPSIS
-
-	use RDFStore::Vocabulary::DC;
-	print $DC::Title->toString;
-
-=head1 DESCRIPTION
-
-=head1 SEE ALSO
-
-=head1 AUTHOR
-
-Alberto Reggiori <alberto.reggiori@jrc.it>

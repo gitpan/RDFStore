@@ -3,9 +3,12 @@ make;
 make test;
 make install;
 
-To build and install DBMS support:
+To build and install (optional) DBMS support:
+ 
 cd dbms;
 make;
 make install;
+ 
+NOTE: the dbmsd(8) code uses old Berkeley DB 1.x style interface. If you can not get it compile, do not disperate and try to use perl land BerkleyDB, DB_File or SDBM_File styles instead :-)
 
 (by default the dbmsd get installed under the /RDFStore branch)

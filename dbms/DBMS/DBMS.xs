@@ -1,4 +1,4 @@
-/* $Id: DBMS.xs,v 1.13 1999/01/04 22:31:55 dirkx Exp $
+/* $Id: DBMS.xs,v 1.2 2001/01/28 13:32:30 reggiori Exp $
  *
  * Perl 'tie' interface to a socket connection. Possibly to
  * the a server which runs a thin feneer to the Berkely DB.
@@ -31,8 +31,18 @@
 #include <sys/time.h>
 #include <arpa/inet.h>
 
+#if PERL_VERSION < 5
+#define PL_sv_undef sv_undef
+#define PL_na na
+#endif
 
 /*#define TPS*/
+
+#if 0
+#define SAFEFREE(x) { fprintf(stderr,"free(%s:%d)\n",__FILE__,__LINE__); safefree(x); }
+#else
+#define SAFEFREE(x) safefree(x)
+#endif
 
 #include <db.h>
 #include "../include/dbms.h"
@@ -75,11 +85,15 @@ static char * dbms_error[]={
 		"Out of memory",
 #define		E_RETRY		1010
 		"Failed after several retries",
-#define		E_NOPE		1011 /* also in Alberto's code !! */
+#define		E_NOPE		1011 /* also in Alberto's code !! do _not_
+				      * change without discussing it !!
+				      */
 		"No such database",
 #define		E_XXX		1012
 		"No such database",
-#define		E_BUG		1013
+#define		E_TOOBIG	1013
+		"Packed bigger than static",
+#define		E_BUG		1014
 		"Conceptual error"
 };	
 
@@ -135,9 +149,8 @@ reconnect(
 		shutdown(me->sockfd,2);
 		}
 	
-	if ( (me->sockfd = socket( AF_INET, SOCK_STREAM, 0))<0 ) {
+	if ( (me->sockfd = socket( AF_INET, SOCK_STREAM, 0))<0 ) 
 		return sure(errno);
-		};
 
 	/* allow for re-use; to avoid that we have to wait for
 	 * a fair amounth of time after disasterous crashes,
@@ -149,20 +162,17 @@ reconnect(
 		return sure(errno);
 		};
 
-	/*	
-		****** fixed for FreeBSD 3.x by AR 2000/06/15 *****
-*/
         if (getsockopt(me->sockfd, SOL_SOCKET, SO_SNDBUF,
                 (void *) &csnd, (void *) &csndl ) < 0) {
 		me->sockfd = -1;
 		close(me->sockfd);
 		return sure(errno);
 		};
-	assert(csndl == sizeof(csnd));
 
-	/**/
+	assert( csndl == sizeof(csnd) );
 
-	/* only set when smaller */
+	/* only set when smaller 
+	 */
 	if ((csnd < sndbuf) &&
            (setsockopt(me->sockfd, SOL_SOCKET, SO_SNDBUF,
                 (const void *) &sndbuf, sizeof(sndbuf)) < 0)) {
@@ -217,8 +227,12 @@ getpack (
 	if (r == NULL) 
 		return E_BUG;
 
+#ifdef STATIC_SC_BUFF
+	if (len > MAX_SC_PAYLOAD)
+		return E_TOOBIG;
+#endif
 	r->size = 0;
-       	r->data = (char *)safemalloc(len);
+       	r->data = (char *)safemalloc(len); 
 
 	if (r->data == 0) 
 		return E_NOMEM;
@@ -229,12 +243,12 @@ getpack (
        		ssize_t l;
 		l = recv(me->sockfd,at,len-gotten,0);
        		if (l < 0) {
-			safefree(r->data);
+			SAFEFREE(r->data);
 			r->data=NULL;
        			return sure(errno);
 			} else
 		if (l == 0) {
-			safefree(r->data);
+			SAFEFREE(r->data);
 			r->data=NULL;
 			return E_CLOSE;
 			};
@@ -280,6 +294,10 @@ int i_comms (
         iov[2].iov_base= (v2 == NULL) ? NULL : v2->data;
         iov[2].iov_len = (v2 == NULL) ? 0    : v2->size;
 
+#ifdef STATIC_CS_BUFF
+	if (iov[0].iov_len + iov[1].iov_len + iov[2].iov_len > MAX_CS_PAYLOAD) 
+		return E_TOOBIG;
+#endif
         msg.msg_name = NULL;
         msg.msg_namelen = 0;
         msg.msg_iov = iov;
@@ -303,6 +321,7 @@ int i_comms (
 		};
 
         s=recv(me->sockfd,&cmd,sizeof(cmd),0);
+
 	if(s==0) {
 		err=E_CLOSE;
 		goto retry_com;
@@ -315,6 +334,7 @@ int i_comms (
 		err=E_FULLREAD;
 		goto exit_com;
                 };
+
 	cmd.len1 = ntohl( cmd.len1 );
 	cmd.len2 = ntohl( cmd.len2 );
 
@@ -333,11 +353,12 @@ int i_comms (
 			} 
 		else {
 			l=rr1.size; d=rr1.data;
-		}
+		};
 		if ((d) && (l>0) && (l<MAX_GERROR-1)) {
 			strncpy(global_error,d,MAX_GERROR);
 			global_error[l]='\0';
-			} else {
+			} 
+		else {
 			strncpy(global_error,"DBMS side errror, no cause reported",MAX_GERROR);	
 			};
 		err = E_ERROR;
@@ -351,12 +372,12 @@ int i_comms (
 		};
 
 	if ( (rr1.data != NULL) && (rr1.size) ) {
-		safefree(rr1.data);
+		SAFEFREE(rr1.data);
 		rr1.size=0;
 		};
 
 	if ( (rr2.data != NULL) && (rr2.size) ) {
-		safefree(rr2.data);
+		SAFEFREE(rr2.data);
 		rr1.size=0;
 		};
 
@@ -367,13 +388,13 @@ int i_comms (
 		*retval = 1;
 		if (r1 != NULL) {
 			if ((r1->size)&&(r1->size))
-				safefree(r1->data);
+				SAFEFREE(r1->data);
 			r1->data = NULL;
 			r1->size = 0;
 			};
 		if (r2 != NULL) {
 			if ((r2->size)&&(r2->size))
-				safefree(r2->data);
+				SAFEFREE(r2->data);
 			r2->data = NULL;
 			r2->size = 0;
 			};
@@ -385,19 +406,19 @@ int i_comms (
 retry_com:
 exit_com:
 	if ((r1 != NULL) && (r1->data != NULL) && (r1->size != 0) ) {
-		safefree(r1->data); r1->size = 0;
+		SAFEFREE(r1->data); r1->size = 0;
 		};
 
 	if ((r2 != NULL) && (r2->data != NULL) && (r2->size != 0) ) {
-		safefree(r2->data); r2->size = 0;
+		SAFEFREE(r2->data); r2->size = 0;
 		};
 
 	if ((rr1.data != NULL) && (rr1.size) )  {
-		safefree(rr1.data); rr1.size =0;
+		SAFEFREE(rr1.data); rr1.size =0;
 		};
 
 	if ((rr2.data != NULL) && (rr1.size) )  {
-		safefree(rr2.data); rr2.size =0;
+		SAFEFREE(rr2.data); rr2.size =0;
 		};
 
 done_com:
@@ -449,7 +470,8 @@ reselect( dbms * me )
 		err = E_VERSION;
 		};
 
-	safefree(v1.data);
+	if (v1.size) 
+		SAFEFREE(v1.data);
 	return err;
 }
 
@@ -510,7 +532,7 @@ int comms (
 			}
 		else
 		if (errs) 
-			fprintf(stderr,"DBMS: Waiting.. %d\n",errs);
+			fprintf(stderr,"DBMS: Waiting %d...\n",errs);
 		};
 
 	if (err) 
@@ -522,7 +544,7 @@ int comms (
 	ttime +=
 		( tnow.tv_sec - tstart.tv_sec ) * 1000000 +
 		( tnow.tv_usec - tstart.tv_usec ) * 1;
-	printf("[%d] ",token);
+	// printf("[%d] ",token);
 #endif
 	/* restore whatever it was before 
 	 */
@@ -573,7 +595,7 @@ TIEHASH(meself,name,mode=DBMS_MODE,host=DBMS_HOST,port=DBMS_PORT)
     		struct hostent * hp;
         	if((hp = gethostbyname(me->host))==NULL) {
 			set_error(E_HOSTNAME);
-			safefree(me);
+			SAFEFREE(me);
                 	XSRETURN_UNDEF;
                 	}; 
 		/* copy the address, rather than the pointer
@@ -584,12 +606,13 @@ TIEHASH(meself,name,mode=DBMS_MODE,host=DBMS_HOST,port=DBMS_PORT)
 
 	if (err=reconnect(me)) {
 		set_error(err);
-		safefree(me);
+		SAFEFREE(me);
 		XSRETURN_UNDEF;
 		};
 
 	if (err=reselect(me)) {
-		safefree(me);
+		set_error(err);
+		SAFEFREE(me);
 		XSRETURN_UNDEF;
 		};
 
@@ -616,7 +639,7 @@ DESTROY(me)
 		);
 #endif
 	close(me->sockfd);
-	safefree(me);
+	SAFEFREE(me);
 
 DBT
 FETCH(me, key)

@@ -12,7 +12,7 @@ Note: this schema is represented in the RDF M&S abbreviated syntax
 http://www.w3.org/TR/REC-rdf-syntax/#abbreviatedSyntax for
 syntactic inclusion in an HTML/XHTML document
  --> 
-
+ 
 <rdf:RDF 
      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" 
      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"

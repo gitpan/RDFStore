@@ -1,5 +1,5 @@
 /* Simple debugging mallic, when/if needed 
- * $Id: mymalloc.c,v 1.4 1998/12/19 19:43:30 dirkx Exp $
+ * $Id: mymalloc.c,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
  */
 #include "deamon.h"
 #include "mymalloc.h" 	/* to keep us honest */
@@ -55,7 +55,7 @@ void debug_free( void * addr, char * file, int line ) {
 			break;
 
 	if (!*p) {
-		log(L_ERROR,"Unanticipated Free from %d",line);
+		log(L_ERROR,"Unanticipated Free from %s:%d",file,line);
 #ifdef DEBUG
 		abort();
 #endif

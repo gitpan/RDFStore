@@ -1,5 +1,5 @@
-#!/usr/local/bin/perl
-$rcsid='$Id: version.pl,v 1.1 1998/11/12 11:36:45 dirkx Exp $';
+#!/usr/bin/perl
+$rcsid='$Id: version.pl,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $';
 #
 $h=`hostname`;
 chop $h;
@@ -20,7 +20,7 @@ $version = $1;
 $date=gmtime(time);
 
 print qq|\
-/*>version.c - $0 generated 
+/*>version.c - $0 generated - $version
  * $rcsid
  */
 #include <sys/types.h>
@@ -29,7 +29,7 @@ print qq|\
 static char rcsid[]="$rcsid";
 #endif
 
-static char version[]= "DBMS $1.$2 - $date - $id\@$h "
+static char version[]= "DBMS/$version - $date - $id\@$h - "
 #ifdef FORKING
 	"forking"
 #else
@@ -37,9 +37,6 @@ static char version[]= "DBMS $1.$2 - $date - $id\@$h "
 #endif
 	;
 
-int get_version( void ) {
-	return $version;
-	}
 char * get_full( void ) {
 	return version;
 	}

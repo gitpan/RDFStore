@@ -2,22 +2,19 @@
 
 use Data::MagicTie;
 use Data::Dumper;
-use Fcntl;
 
 $Data::Dumper::Indent = 1;
 
-die "Usage: $0 <filename>  <see_values> <no_serialise> <Q_factor> <local_or_remote> [ <style> <host> <port>]\n"
-	unless($#ARGV>=4);
+die "Usage: $0 <filename>  <see_values> [<style> <split_factor> <host> <port>]\n"
+	unless($#ARGV>=1);
 
 my $file = shift;
 $file =~ s/\.([dbm]+)$//;
 my $seevalues = shift;
-my $noft = shift;
+my $style = shift;
 my $Q = shift;
 undef $Q
 	unless ($Q =~ /\d+/);
-my $lr = shift;
-my $style = shift;
 my $host = shift;
 undef $host
 	unless($host ne '');
@@ -25,14 +22,11 @@ my $port = shift;
 undef $port
 	unless($port =~ /\d+/);
 
-tie %tmp, "Data::MagicTie",$file,( lr => $lr, mode => ($style eq 'BerkeleyDB') ?  DB_RDONLY : O_CREAT|O_RDONLY, noft => $noft, Q=> $Q, style => $style, dbms_host => $host, dbms_port => $port )
+tie %tmp, "Data::MagicTie",
+		( Name => $file, Mode => 'r', Split => $Q, Style => $style, Host => $host, Port => $port )
 	or die "Could not open $file: $!";
 
 while(($k,$v)=each %tmp) {
-
-	print $file." "
-		if $more_than_one;
-
 	$k =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
 	$v =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
 

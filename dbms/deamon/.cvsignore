@@ -1,5 +1,4 @@
 version.c
-version.pl
 dbmsd
 *.gz
 *.core

@@ -1,6 +1,5 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori / <alberto.reggiori@jrc.it>
-# *	ISIS/RIT, Joint Research Center Ispra (I)
+# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -8,7 +7,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://xml.jrc.it/RDFStore/LICENSE
+# *     http://rdfstore.jrc.it/LICENSE
 # *
 # *
 # * Changes:
@@ -18,10 +17,17 @@
 # * 		- modified pod documentation
 # *     version 0.31
 # *		- updated documentation
+# *     version 0.4
+# *             - fixed a few warnings
 # *                 
 
 package RDFStore::Stanford::Resource;
 {
+use vars qw ($VERSION);
+use strict;
+ 
+$VERSION = '0.4';
+
 use RDFStore::Stanford::RDFNode;
 
 @RDFStore::Stanford::Resource::ISA = qw( RDFStore::Stanford::RDFNode );
@@ -68,4 +74,4 @@ RDFStore::Resource(3)
 
 =head1 AUTHOR
 
-	Alberto Reggiori <alberto.reggiori@jrc.it>
+	Alberto Reggiori <areggiori@webweaving.org>
