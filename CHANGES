@@ -1,5 +1,39 @@
 Revision history for Perl extension RDFStore.
 
+version 0.41 - Thu Jul 12 17:11:02 CEST 2001
+-------------------------------------------------------------------------------------------
+
+	RDFStore::Parser::SiRPAC
+		- fixed bug with XML::Parser 2.30 using expat-1.95.1
+		     * XMLSCHEMA set to http://www.w3.org/XML/1998/namespace (see http://www.w3.org/TR/1999/REC-xml-names-19990114/#ns-using)
+		     * added XMLSCHEMA_prefix
+		- changed RDF_SCHEMA_NS to http://www.w3.org/2000/01/rdf-schema#
+
+	RDFStore::Parser::OpenHealth
+		- fixed bug with XML::Parser 2.30 using expat-1.95.1
+		     * XMLSCHEMA set to http://www.w3.org/XML/1998/namespace (see http://www.w3.org/TR/1999/REC-xml-names-19990114/#ns-using)
+		     * added XMLSCHEMA_prefix
+		- changed RDF_SCHEMA_NS to http://www.w3.org/2000/01/rdf-schema#
+
+	RDFStore::Stanford::Digest::Util
+		- updated digestBytes2HashCode()
+
+	RDFStore::Model
+		- updated _getLookupValue() and _getValuesFromLookup() to consider negative hashcodes
+
+	RDFStore::Literal
+		- added getDigest() to generate the digest using quotes and the label
+
+	Data::MagicTie
+		- fixed compilation bug while strict subs
+		- added a warning in del_dup() if not supported by underlying DB_File library
+		- updated _untie() to avoid warnings while untie databases
+
+	t/
+		- updated rdfstore.t
+		- updated parser.t
+		- updated magictie.t moving DBMS specific code to dbms/DBMS/t/magictie.t
+
 version 0.4 - Mon Jun 18 17:18:36 CEST 2001
 -------------------------------------------------------------------------------------------
 

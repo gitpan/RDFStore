@@ -59,11 +59,16 @@
 # *		- updated accordingly to http://www.w3.org/RDF/Implementations/SiRPAC/
 # *		- bug fix in reify() when generate the subject property triple
 # *		- added getReificationCounter()
+# *     version 0.41
+# *		- fixed bug with XML::Parser 2.30 using expat-1.95.1
+# *		     * XMLSCHEMA set to http://www.w3.org/XML/1998/namespace (see http://www.w3.org/TR/1999/REC-xml-names-19990114/#ns-using)
+# *		     * added XMLSCHEMA_prefix
+# *		- changed RDF_SCHEMA_NS to http://www.w3.org/2000/01/rdf-schema#
 # *
 
 package RDFStore::Parser::SiRPAC;
 {
-	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
+	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $XMLSCHEMA_prefix $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
 	use strict;
 	use Carp qw(carp croak cluck confess);
 	use URI;
@@ -73,15 +78,16 @@ package RDFStore::Parser::SiRPAC;
 BEGIN
 {
 	require XML::Parser::Expat;
-    	$VERSION = '0.31';
+    	$VERSION = '0.41';
     	croak "XML::Parser::Expat.pm version 2 or higher is needed"
 		unless $XML::Parser::Expat::VERSION =~ /^2\./;
 }
 
 $RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS="http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-$RDFStore::Parser::SiRPAC::RDF_SCHEMA_NS="http://www.w3.org/TR/1999/PR-rdf-schema-19990303#";
+$RDFStore::Parser::SiRPAC::RDF_SCHEMA_NS="http://www.w3.org/2000/01/rdf-schema#";
 $RDFStore::Parser::SiRPAC::RDFX_NS="http://interdataworking.com/vocabulary/order-20000527#";
-$RDFStore::Parser::SiRPAC::XMLSCHEMA="xml";
+$RDFStore::Parser::SiRPAC::XMLSCHEMA_prefix="xml";
+$RDFStore::Parser::SiRPAC::XMLSCHEMA="http://www.w3.org/XML/1998/namespace";
 $RDFStore::Parser::SiRPAC::XML_space=$RDFStore::Parser::SiRPAC::XMLSCHEMA."space";
 $RDFStore::Parser::SiRPAC::XML_space_preserve="preserve";
 $RDFStore::Parser::SiRPAC::XMLNS="xmlns";
@@ -589,9 +595,9 @@ sub RDFXML_StartElementHandler {
 
 	if(not(defined $sNamespace)) {			
 		my ($prefix,$suffix) = split(':',$tag);
-		if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA) {
+		if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA_prefix) {
 			$sNamespace = $RDFStore::Parser::SiRPAC::XMLSCHEMA;
-			$tag = $expat->generate_ns_name($suffix,$sNamespace); #xml:lang
+			$tag = $expat->generate_ns_name($suffix,$sNamespace);
 		} else {
 			$expat->xpcroak("Unresolved namespace prefix '$prefix' for '$suffix'")
 				if( (defined $prefix) && (defined $suffix) );
@@ -632,7 +638,7 @@ sub RDFXML_StartElementHandler {
 				($namespace ne '') ) { #default namespace
 				my ($prefix,$suffix) = split(':',$attname);
 				if( (defined $prefix) && (defined $suffix) ) {
-					if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA) {
+					if($prefix eq $RDFStore::Parser::SiRPAC::XMLSCHEMA_prefix) {
 						$namespace = $RDFStore::Parser::SiRPAC::XMLSCHEMA;
 						$attlist[$n] = [$namespace,$suffix];
 					} else {
@@ -1398,7 +1404,7 @@ sub processTypedNode {
 		$sValue =~ s/([ ])+$//g;
 
 		if ( 	(!($sAttribute =~ /^$RDFStore::Parser::SiRPAC::RDF_SYNTAX_NS/)) &&
-			(!($sAttribute =~ /^$RDFStore::Parser::SiRPAC::XMLSCHEMA/)) ) {
+			(!($sAttribute =~ m|^$RDFStore::Parser::SiRPAC::XMLSCHEMA|)) ) {
         		if(length($sValue) > 0) {
               			my $newPredicate =  RDFStore::Parser::SiRPAC::Element->new($typedNode->{attlist}->[$n]->[0],
 							$typedNode->{attlist}->[$n]->[1],[
@@ -1878,7 +1884,7 @@ sub expandAttributes {
     		my $sAttribute = $ele->{attlist}->[$count++]->[0].$ele->{attlist}->[$count-1]->[1];
     		my $sValue = getAttributeValue($expat, $ele->{attlist},$sAttribute);
 		$count++;
-      		if ($sAttribute =~ /^$RDFStore::Parser::SiRPAC::XMLSCHEMA/) {
+      		if ($sAttribute =~ m|^$RDFStore::Parser::SiRPAC::XMLSCHEMA|) {
         		# expands after parsing, that's why it is useless here... :(
            		# because of concatenation without : inbetween
 			# ...there was something more here to do....

@@ -54,41 +54,47 @@
 #
 ##############################################################################
 
-use DBMS;
+use Data::MagicTie;
+use Data::Dumper;
 use Fcntl;
-my $host= shift or 'localhost';
 
-my $more_than_one = ($#ARGV==0) ? 0 : 1;
+$Data::Dumper::Indent = 1;
 
-while(1) {
-	last unless $ARGV[0]  =~ m/^-/;
-	if ($1 eq '-l') {
-		$more_than_one = 0;
-		}
-	else {
-		@ARGV=(); 
-		last;
-		};
+die "Usage: $0 <filename>  <see_values> <no_serialise> <Q_factor> <local_or_remote> [ <style> <host> <port>]\n"
+	unless($#ARGV>=4);
+
+my $file = shift;
+$file =~ s/\.([dbm]+)$//;
+my $seevalues = shift;
+my $noft = shift;
+my $Q = shift;
+undef $Q
+	unless ($Q =~ /\d+/);
+my $lr = shift;
+my $style = shift;
+my $host = shift;
+undef $host
+	unless($host ne '');
+my $port = shift;
+undef $port
+	unless($port =~ /\d+/);
+
+tie %tmp, "Data::MagicTie",$file,( lr => $lr, mode => ($style eq 'BerkeleyDB') ?  DB_RDONLY : O_CREAT|O_RDONLY, noft => $noft, Q=> $Q, style => $style, dbms_host => $host, dbms_port => $port )
+	or die "Could not open $file: $!";
+
+while(($k,$v)=each %tmp) {
+
+	#print $file." "
+	#	if $more_than_one;
+
+	$k =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+	$v =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+
+	$v= Dumper( $v ) if ref($v);
+
+	print "'$k'";
+	print "=\t$v"
+		if $seevalues;
+	print "\n";
 	};
-
-if($#ARGV<0) {
-	print STDERR "Syntax: $0 <dbms_host> [-l] <file [files]>\n";
-	exit 1;
-	};
-
-
-foreach $file (@ARGV) {
-	$file =~ s/\.([dbm]+)$//;
-	tie %tmp, "DBMS",$file,O_RDONLY ,$host
-		or die "Could not open $file: $! - $DBMS_ERROR";
-
-	while(($k,$v)=each %tmp) {
-
-		print $file." "
-			if $more_than_one;
-
-		print "$k =\t$v\n";
-		};
-	untie %tmp
-	};
-
+untie %tmp;

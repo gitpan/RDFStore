@@ -46,6 +46,8 @@
 # *               that match Stanford java ones exactly
 # *		- added inheritance from RDFStore::Stanford::Digest::Digestable
 # *		- removed RDFStore::Stanford::Resource inheritance
+# *     version 0.41
+# *             - updated _getLookupValue() and _getValuesFromLookup() to consider negative hashcodes
 # *
 
 package RDFStore::Model;
@@ -53,7 +55,7 @@ package RDFStore::Model;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.41';
 
 use Carp;
 use RDFStore::Stanford::Digest;
@@ -135,6 +137,9 @@ sub new {
 
 		#we should either separate the Data::MagicTie options or zap the ones not needed
 		delete($params{Duplicates});
+
+		$params{Shared} = $shared
+			if(defined $shared);
 
 		$self->{options} = \%params;
 
@@ -442,7 +447,7 @@ sub find {
         return $res;
 };
 
-# Clone the model - So due that copy is epensive we use sharing :)
+# Clone the model - So due that copy is expensive we use sharing :)
 sub duplicate {
 	my ($class) = @_;
 
@@ -539,17 +544,16 @@ sub toStrawmanRDF {
 
 #Storage related part
 
-# NOTE: RDFStore::Literal and RDFStore::Resource generate the dame hashCode() for URI strings
 sub _getLookupValue {
 	my ($class) = shift;
 
-	return join('-', map { int($_) } @_);
+	return join('/', @_);
 };
 
 sub _getValuesFromLookup {
 	my ($class) = shift;
 
-	return split('-',$_[0]);
+	return split('/',$_[0]);
 };
 
 # return a list of RDFNode objects for a given (sp), (po) or (so) couple

@@ -19,6 +19,8 @@
 # *		- added getDigestAlgorithm() method
 # *		- Devon Smith <devon@taller.pscl.cwru.edu> changed digestBytes2HashCode() and toHexString() to
 # *		  generate digests and hashes that match Stanford java ones exactly
+# *     version 0.41
+# *		- updated digestBytes2HashCode()
 # *
 
 package RDFStore::Stanford::Digest::Util;
@@ -26,7 +28,7 @@ package RDFStore::Stanford::Digest::Util;
 use vars qw ( $VERSION );
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.41';
 
 $RDFStore::Stanford::Digest::Util::perl_version_ok=1;
 eval {
@@ -91,11 +93,11 @@ sub digestBytes2HashCode {
 
         my @stuff=split(//,$d);
 
-        #use integer; #DS added this pragma but it seems not the same of int() below....
-        return int(        (  (ord $stuff[0]) & 0xff) |
-                        (( (ord $stuff[1]) & 0xff) << 8) |
-                        (( (ord $stuff[2]) & 0xff) << 16) |
-                        (( (ord $stuff[3]) & 0xff) << 24) );
+        use integer;
+        return ( (  (ord $stuff[0]) & 0xff) |
+               (( (ord $stuff[1]) & 0xff) << 8) |
+               (( (ord $stuff[2]) & 0xff) << 16) |
+               (( (ord $stuff[3]) & 0xff) << 24) );
 	#return int(     (unpack("b*",$stuff[0]) & 0xff) |
         #                ((unpack("b*",$stuff[2]) & 0xff) << 8) |
         #                ((unpack("b*",$stuff[4]) & 0xff) << 16) |

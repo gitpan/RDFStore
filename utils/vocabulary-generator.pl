@@ -16,10 +16,13 @@
 #    the documentation and/or other materials provided with the
 #    distribution.
 #
-# 3. All advertising materials mentioning features or use of this
-#    software must display the following acknowledgment:
-#    This product includes software developed by the University of
-#    California, Berkeley and its contributors.
+# 3. The end-user documentation included with the redistribution,
+#    if any, must include the following acknowledgment:
+#       "This product includes software developed by
+#        Alberto Reggiori <areggiori@webweaving.org> and
+#        Dirk-Willem van Gulik <dirkx@webweaving.org>."
+#    Alternately, this acknowledgment may appear in the software itself,
+#    if and wherever such third-party acknowledgments normally appear.
 #
 # 4. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
@@ -44,9 +47,9 @@
 #
 # ====================================================================
 #
-# This software consists of work developed by Alberto Reggiori and was originally
-# based on public domain software written at the Stanford University Database
-# Group by Sergey Melnik.
+# This software consists of work developed by Alberto Reggiori and
+# Dirk-Willem van Gulik and was originally based on public domain software
+# written at the Stanford University Database Group by Sergey Melnik.
 # For more information on the RDF API Draft work, 
 # please see <http://www-db.stanford.edu/~melnik/rdf/api.html>
 #

@@ -37,6 +37,10 @@
 # *		- added perl version checking for Data::MagicTie::Array methods
 # *		- added multiple reader/single writer locking support for DB_File
 # *		- does not generate multiple '.db' extensions to files in _tie()
+# *     version 0.41
+# *		- fixed compilation bug while strict subs
+# *		- added a warning in del_dup() if not supported by underlying DB_File library
+# *		- updated _untie() to avoid warnings while untie databases
 # *
 
 package Data::MagicTie;
@@ -93,7 +97,7 @@ package Data::MagicTie;
 	# Number of databases to split around - none as default
 	$Data::MagicTie::Split_default = 1;
 
-	$VERSION = '0.4';
+	$VERSION = '0.41';
 
         # The lock() and unlock() facilities will be ONLY used inside implicit
         # methods (FETCH,STORE, NEXTKEY etc. etc. - see below)
@@ -240,20 +244,29 @@ package Data::MagicTie;
 		$params{Mode}='';
                 if($params{Mode} eq 'r') {
 			if($params{Style} eq 'BerkeleyDB') {
+				{
+				no strict;
                         	$params{Mode} = DB_RDONLY;
+				};
 			} else {
                         	$params{Mode} = O_RDONLY;
 			};
                 } elsif($params{Mode} eq 'w') {
 			if($params{Style} eq 'BerkeleyDB') {
+				{
+				no strict;
                         	$params{Mode} = DB_CREATE;
+				};
 			} else {
                         	$params{Mode} = O_WRONLY;
 			};
                 } elsif(	($params{Mode} eq 'rw') ||
                 		($params{Mode} eq 'wr') ) {
 			if($params{Style} eq 'BerkeleyDB') {
+				{
+				no strict;
                         	$params{Mode} = DB_CREATE;
+				};
 			} else {
                         	$params{Mode} = O_RDWR;
 			};
@@ -261,7 +274,10 @@ package Data::MagicTie;
 			if(     (exists $params{Style}) &&
 				(defined $params{Style}) &&
 				($params{Style} eq 'BerkeleyDB') ) {
+				{
+				no strict;
                         	$params{Mode} = DB_CREATE;
+				};
 			} else {
                         	$params{Mode} = O_CREAT|O_RDWR;
 			};
@@ -317,6 +333,7 @@ package Data::MagicTie;
 
                 $class->{db} = {};
 		$class->{db_stuff} = {};
+		$class->{db_env} = {};
 		$class->{cursor}={};
                 $class->{dbs_count}=-1;
 		$class->{duplicates}={}; #to iterate over duplicate keys
@@ -371,7 +388,9 @@ package Data::MagicTie;
                                         $DB_File::DB_RECNO );
 			} elsif(	(exists $class->{db_options}->{Style}) &&
 					($class->{db_options}->{Style} eq 'BerkeleyDB') ) {
-                		my $env = new BerkeleyDB::Env( Flags => DB_INIT_CDB|DB_INIT_MPOOL );
+				{
+				no strict;
+                		$class->{db_env}->{ $s } = new BerkeleyDB::Env( Flags => DB_INIT_CDB|DB_INIT_MPOOL );
                 		$class->{db}->{ $s } = tie ( 
 						( 	($class->{'db_stuff'}->{$s} =~ /HASH/) ? 
 							%{ $class->{'db_stuff'}->{$s} } :
@@ -379,7 +398,7 @@ package Data::MagicTie;
 						(       ($class->{'db_stuff'}->{$s} =~ /HASH/) ?
 							"BerkeleyDB::Btree" : 
 							"BerkeleyDB::Recno" ), 
-						(	Env => $env, 
+						(	Env => $class->{db_env}->{ $s }, 
 							Filename => $ffname, 
 							Flags => $class->{db_options}->{Mode}, 
 							Property  => (	($class->{'db_stuff'}->{$s} =~ /HASH/) &&
@@ -391,6 +410,7 @@ package Data::MagicTie;
 				$class->{cursor}->{ $s } = $class->{db}->{ $s }->db_cursor()
 					if(	(exists $class->{db}->{ $s }) &&
 						(defined $class->{db}->{ $s }) );
+				};
 			} elsif(	(exists $class->{db_options}->{Style}) &&
 					($class->{db_options}->{Style} eq 'DBMS') ) {
                 		$class->{db}->{ $s } = tie ( 
@@ -473,9 +493,23 @@ package Data::MagicTie;
 			if(	(exists $class->{db_options}->{Style}) &&
                                 (	($class->{db_options}->{Style} eq 'SDBM_File') ||
 					($class->{db_options}->{Style} eq 'DB_File') ) ) {
-					close($class->{LOCKFD}->{ $s });
+					close($class->{LOCKFD}->{ $s })
+						if(	(exists $class->{LOCKFD}->{ $s }) &&
+							(defined $class->{LOCKFD}->{ $s }) );
 			};
-                        undef $class->{'db'}->{$s};
+			delete $class->{cursor}->{ $s }
+				if(	(exists $class->{cursor}->{ $s }) &&
+					(defined $class->{cursor}->{ $s }) );
+			delete $class->{db_env}->{ $s }
+				if(	(exists $class->{db_env}->{ $s }) &&
+					(defined $class->{db_env}->{ $s }) );
+			delete $class->{duplicates}->{ $s }
+				if(	(exists $class->{duplicates}->{ $s }) &&
+					(defined $class->{duplicates}->{ $s }) );
+			delete $class->{duplicates_count}->{ $s }
+				if(	(exists $class->{duplicates_count}->{ $s }) &&
+					(defined $class->{duplicates_count}->{ $s }) );
+                        delete $class->{'db'}->{$s};
 
                         if (ref($class->{'db_stuff'}->{$s}) =~ /ARRAY/) {
                                 untie @{$class->{'db_stuff'}->{$s}};
@@ -661,9 +695,12 @@ print STDERR "F - ",$class->{'db_options'}->{Name},"(@_)\n"
 				$status=$class->{'db'}->{ $id }->seq($orig_key, $values[0], R_CURSOR)
 					if $status;
 			} elsif($class->{db_options}->{Style} eq 'BerkeleyDB') {
+				{
+				no strict;
 				$status=$class->{cursor}->{$id}->c_get($orig_key, $values[0], DB_NEXT_DUP);
 				$status=$class->{cursor}->{$id}->c_get($orig_key, $values[0], DB_SET_RANGE)
 					if $status;
+				};
 			};
 		} else {
 			my $value = $class->{'db'}->{ $id }->FETCH(@_);
@@ -892,6 +929,8 @@ print STDERR "find_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 				};
                         };
 		} elsif($class->{db_options}->{Style} eq 'BerkeleyDB') {
+			{
+			no strict;
 			my $s; 
 			my $vvv;
 			my $kkk=$key;
@@ -903,6 +942,7 @@ print STDERR "find_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
                                        	$status=0;
 					last;
 				};
+			};
 			};
 		} elsif($class->{db_options}->{Style} eq 'DB_File') {
 			$class->_lock($id)
@@ -983,6 +1023,8 @@ print STDERR "get_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 				};
                         };
 		} elsif($class->{db_options}->{Style} eq 'BerkeleyDB') {
+			{
+			no strict;
 			my $kkk=$key;
 			my $vvv;
 			for(	$status = $class->{cursor}->{$id}->c_get($kkk, $vvv, DB_SET_RANGE);
@@ -999,6 +1041,7 @@ print STDERR "get_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 				};
     			};
     			return ($wantarray ? ($flag ? %values : @values) : $counter); 
+			};
 		} elsif($class->{db_options}->{Style} eq 'DB_File') {
 			$class->_lock($id)
                 		if(defined $class->{LOCKMODE});
@@ -1204,6 +1247,8 @@ print STDERR "del_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 
 				return $value;
 			} elsif($class->{db_options}->{Style} eq 'BerkeleyDB') {
+				{
+				no strict;
                         	my $vv = $class->_serialise($value);
 
 				my $status; 
@@ -1216,7 +1261,12 @@ print STDERR "del_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 						if(	($kkk eq $key) &&
 							($vvv eq $vv) );
 				};
+				};
 			} elsif($class->{db_options}->{Style} eq 'DB_File') {
+				unless($class->{'db'}->{ $id }->can('del_dup')) {
+					warn "del_dup method not supported from this DB_File version";
+					return;
+				};
                         	my $vv = $class->_serialise($value);
 
 				$class->_lock($id)

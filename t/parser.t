@@ -120,9 +120,9 @@ eval {
 				Init    => sub { "INIT"; },
                         	Final   => sub { "FINAL"; },
                         	Assert  => sub { "STATEMENT"; },
-                        	Start_XML_Literal  => sub { $_[0]->recognized_string; },
-                        	Stop_XML_Literal  => sub { $_[0]->recognized_string; },
-                        	Char_Literal  => sub { $_[0]->recognized_string; }
+                        	Start_XML_Literal  => sub { $_[0]->recognized_string if($_[0]->can('recognized_string')); },
+                        	Stop_XML_Literal  => sub { $_[0]->recognized_string if($_[0]->can('recognized_string')); },
+                        	Char_Literal  => sub { $_[0]->recognized_string if($_[0]->can('recognized_string')); }
 			);
 };
 
@@ -182,9 +182,9 @@ eval {
 				Init    => sub { "INIT"; },
                         	Final   => sub { "FINAL"; },
                         	Assert  => sub { "STATEMENT"; },
-                        	Start_XML_Literal  => sub { $_[0]->recognized_string; },
-                        	Stop_XML_Literal  => sub { $_[0]->recognized_string; },
-                        	Char_Literal  => sub { $_[0]->recognized_string; }
+                        	Start_XML_Literal  => sub { $_[0]->recognized_string if($_[0]->can('recognized_string')); },
+                        	Stop_XML_Literal  => sub { $_[0]->recognized_string if($_[0]->can('recognized_string')); },
+                        	Char_Literal  => sub { $_[0]->recognized_string  if($_[0]->can('recognized_string')); }
 			);
 };
 

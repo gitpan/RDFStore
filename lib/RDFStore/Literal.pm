@@ -20,6 +20,8 @@
 # *		- updated accordingly to rdf-api-2001-01-19
 # *		- modified getLabel() and getURI() to return a lebel even if the Literal is a BLOB (using Storable)
 # *		- updated equals() method to make a real comparison of BLOBs using Storable module
+# *	version 0.41
+# *		- added getDigest() to generate the digest using quotes and the label
 # *
 
 package RDFStore::Literal;
@@ -29,7 +31,7 @@ use strict;
 
 use Carp;
  
-$VERSION = '0.4';
+$VERSION = '0.41';
 
 use Storable qw ( nfreeze ); #used for BLOBs comparinson
 use RDFStore::Stanford::Literal;
@@ -57,6 +59,17 @@ sub getLabel {
 	};
 
 	return $label;
+};
+
+# the following assure that different digests are generated for the same URI string for Literal and Resource
+sub getDigest {
+        unless(defined $_[0]->{digest}) {
+                $_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest(
+                                &RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),
+                                '"'.$_[0]->getLabel().'"' )
+                        or croak "Cannot compute Digest for literal ",$_[0]->getLabel();
+        };
+        return $_[0]->{digest};
 };
 
 sub getURI {

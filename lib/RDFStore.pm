@@ -22,7 +22,7 @@
 
 package RDFStore;
 
-$VERSION='0.31';
+$VERSION='0.40';
 
 use RDFStore::Parser::SiRPAC;
 use RDFStore::Parser::OpenHealth;
@@ -125,7 +125,6 @@ This RDFStore version is aligned with the latest changes from current revision: 
 
 Not supported:
 
-	* NodeFactory::createOrdinal()
 	* order/backorder experimental from Sergey Melnik
 
 =head1 SEE ALSO

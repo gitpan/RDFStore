@@ -60,6 +60,7 @@ In addition, you can install the (optional) DBMS module for TCP/IP remote storag
  
 cd dbms;
 make;
+make test;
 make install;
  
 NOTE: the dbmsd(8) code uses old Berkeley DB 1.x style interface. If you can not get it compile, do not disperate and try to use perl land BerkleyDB, DB_File or SDBM_File styles instead :-)
@@ -75,7 +76,7 @@ Additionally you can refer to the good Javadoc stuff of Sergey at http://www-db.
 
 SUPPORT & DEVELOPMENT
 
-The homepage for RDFStore is http://rdfstore.jrc.it
+The homepage for RDFStore is http://rdfstore.sourceforge.net
 A public mailing about technical developments, updates and bug reports
 is available at rdfstore@yahoogroups.com and archived at http://groups.yahoo.com/group/rdfstore
 

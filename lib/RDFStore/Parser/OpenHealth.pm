@@ -34,11 +34,16 @@
 # *		- changed way to return undef in subroutines
 # *		- fixed a few warnings
 # *		- fixed warnings in getAttributeValue()
+# *     version 0.41
+# *             - fixed bug with XML::Parser 2.30 using expat-1.95.1
+# *                  * XMLSCHEMA set to http://www.w3.org/XML/1998/namespace (see http://www.w3.org/TR/1999/REC-xml-names-19990114/#ns-using)
+# *                  * added XMLSCHEMA_prefix
+# *		- changed RDF_SCHEMA_NS to http://www.w3.org/2000/01/rdf-schema#
 # *
 
 package RDFStore::Parser::OpenHealth;
 {
-	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $ENABLE_EXPERIMENTAL $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
+	use vars qw($VERSION %Built_In_Styles $RDF_SYNTAX_NS $RDF_SCHEMA_NS $RDFX_NS $ENABLE_EXPERIMENTAL $XMLSCHEMA_prefix $XMLSCHEMA $XML_space $XML_space_preserve $XMLNS $RDFMS_parseType $RDFMS_type $RDFMS_about $RDFMS_bagID $RDFMS_resource $RDFMS_aboutEach $RDFMS_aboutEachPrefix $RDFMS_ID $RDFMS_RDF $RDFMS_Description $RDFMS_Seq $RDFMS_Alt $RDFMS_Bag $RDFMS_predicate $RDFMS_subject $RDFMS_object $RDFMS_Statement);
 	use strict;
 	use Carp qw(carp croak cluck confess);
 	use URI;
@@ -48,14 +53,15 @@ package RDFStore::Parser::OpenHealth;
 BEGIN
 {
 	require XML::Parser::Expat;
-    	$VERSION = '0.31';
+    	$VERSION = '0.41';
     	croak "XML::Parser::Expat.pm version 2 or higher is needed"
 		unless $XML::Parser::Expat::VERSION =~ /^2\./;
 }
 
 $RDFStore::Parser::OpenHealth::RDF_SYNTAX_NS="http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-$RDFStore::Parser::OpenHealth::RDF_SCHEMA_NS="http://www.w3.org/TR/1999/PR-rdf-schema-19990303#";
-$RDFStore::Parser::OpenHealth::XMLSCHEMA="xml";
+$RDFStore::Parser::OpenHealth::RDF_SCHEMA_NS="http://www.w3.org/2000/01/rdf-schema#";
+$RDFStore::Parser::OpenHealth::XMLSCHEMA_prefix="xml";
+$RDFStore::Parser::OpenHealth::XMLSCHEMA="http://www.w3.org/XML/1998/namespace";
 $RDFStore::Parser::OpenHealth::XMLNS="xmlns";
 $RDFStore::Parser::OpenHealth::RDFMS_parseType = $RDFStore::Parser::OpenHealth::RDF_SYNTAX_NS . "parseType";
 $RDFStore::Parser::OpenHealth::RDFMS_type = $RDFStore::Parser::OpenHealth::RDF_SYNTAX_NS . "type";
@@ -422,7 +428,7 @@ sub RDFXML_StartElementHandler {
 	my $sNamespace = $expat->namespace($tag);
 	if(not(defined $sNamespace)) {			
 		my ($prefix,$suffix) = split(':',$tag);
-		if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA) {
+		if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA_prefix) {
 			$sNamespace = $RDFStore::Parser::OpenHealth::XMLSCHEMA;
 			$tag = $expat->generate_ns_name($suffix,$sNamespace); #xml:lang
 		} else {
@@ -437,7 +443,7 @@ sub RDFXML_StartElementHandler {
 		unless(defined $namespace) { #default namespace
 			my ($prefix,$suffix) = split(':',$attname);
 			if( (defined $prefix) && (defined $suffix) ) {
-				if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA) {
+				if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA_prefix) {
 					$namespace = $RDFStore::Parser::OpenHealth::XMLSCHEMA;
 					$attlist[$n] = [$namespace.$suffix];
 				} else {
@@ -474,7 +480,7 @@ sub RDFXML_EndElementHandler {
 	my $sNamespace = $expat->namespace($tag);
 	if(not(defined $sNamespace)) {			
 		my ($prefix,$suffix) = split(':',$tag);
-		if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA) {
+		if($prefix eq $RDFStore::Parser::OpenHealth::XMLSCHEMA_prefix) {
 			$sNamespace = $RDFStore::Parser::OpenHealth::XMLSCHEMA;
 			$tag = $expat->generate_ns_name($suffix,$sNamespace); #xml:lang
 		} else {
