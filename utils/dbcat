@@ -27,8 +27,8 @@ tie %tmp, "Data::MagicTie",
 	or die "Could not open $file: $!";
 
 while(($k,$v)=each %tmp) {
-	$k =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
-	$v =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+	#$k =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+	#$v =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
 
 	$v= Dumper( $v ) if ref($v);
 

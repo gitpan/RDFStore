@@ -60,16 +60,15 @@ use Carp;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] -stuff <URL_or_filename> [-compression] [-freetext] [-strawman] [-rdfcore] [-bagIDs] [-GenidNumberFile] [-output_dir <valid_directoryname>] [-storename <IDENTIFIER>] [-style <BerkeleyDB|DB_File|DBMS>] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise] [-namespace <URL_or_filename>]
 
-Parse an input RDF file and optionally store the generated triplets into a Data::MagicTie(3) database using the RDFStore(3) API.
+$0 [-h] -stuff <URL_or_filename> [-strawman] [-bagIDs] [-rdfcore] [-GenidNumberFile] [-namespace <URL_or_filename>]
+
+Generates N-Triples out of RDF XML syntax. (see http://www.w3.org/2001/sw/RDFCore/ntriples/)
 
 -h	Print this message
 
 -stuff	<URL_or_filename>
 		URL or filename. '-' denotes STDIN
-
-[-v]	Be verbose
 
 [-strawman]
 		RDFStore::Parser::OpenHealth parser, RDFStore::Parser::SiRPAC otherwise.
@@ -83,45 +82,16 @@ Parse an input RDF file and optionally store the generated triplets into a Data:
 [-GenidNumberFile]
 		EXISTING valid filename containing a single integer value to seed the parser "genid" numbers with the given value (I.e. for anonymous resources). Note that an exclusive lock on the file is used to guarantee that the value is consistent across runs (and concurrent processes)
 
-[-output_dir <valid_directoryname>]
-		Output directory for DB files generated. Default is cwd.
-
-[-storename <IDENTIFIER>]
-		A label or identifier to identify the RDFStore database. By setting this option the parsing results 
-		are stored in DB files. Default is to use in-memory datastructures. To use rdfquery.pl later you want 
-		to set 1 here :-)
-		(see -output_dir also)
-
-[-compression]
-                Use RLE encoding in the persistent RDFStore model
-
-[-freetext]
-		Generates free-text searchable database
-
 [-namespace <URL_or_filename>]
 		Specify a string to set a base URI to use for the generation of 
 		resource URIs during parsing
-
-[-style <BerkeleyDB|DB_File|DBMS>]
-		BerkeleyDB, DB_File or DBMS store. Default is DB_File.
-
-[-split <number>]
-		Number of DB files to split around - see Data::MagicTie(3)
-
-[-dbms_host <hostname>]
-		Name or IP number of the DBMS host. This option makes sense only using the DBMS style; default is 'localhsot' see man dbmsd(8)
-
-[-dbms_port <port>]
-		TCP/IP port number of the DBMS host. This option makes sense only using the DBMS style; default is 1234
-[-serialise]
-		generate strawman RDF output
 
 EOU
 
 # Process options
 print $Usage and exit if ($#ARGV<0);
 
-my ($rdfcore,$compression,$freetext,$GenidNumberFile, $verbose,$namespace,$storename,$strawman,$stuff,$style,$split,$output_dir,$dbms_host,$dbms_port,$serialise);
+my ($rdfcore,$GenidNumberFile, $namespace,$strawman,$stuff);
 my $bagIDs=0;
 while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
     my $opt = shift;
@@ -134,47 +104,13 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
         $GenidNumberFile = shift;
     } elsif ($opt eq '-rdfcore') {
         $rdfcore = 1;
-    } elsif ($opt eq '-compression') {
-        $compression = 1;
-    } elsif ($opt eq '-freetext') {
-        $freetext = 1;
-    } elsif ($opt eq '-serialise') {
-        $serialise = 1;
     } elsif ($opt eq '-strawman') {
         $strawman = 1;
-    } elsif ($opt eq '-storename') {
-        $storename = shift;
-	$storename .= '/'
-		unless(	(not(defined $storename)) || 
-			($storename eq '') || 
-			($storename =~ /\s+/) || 
-			($storename =~ /\/$/) );
-    } elsif ($opt eq '-style') {
-	$style=shift;
     } elsif ($opt eq '-h') {
         print $Usage;
         exit;
-    } elsif ($opt eq '-v') {
-	$verbose=1;
     } elsif ($opt eq '-bagIDs') {
         $bagIDs = 1;
-    } elsif ($opt eq '-split') {
-	$opt=shift;
-        $split = (int($opt)) ? $opt : 0;
-    } elsif ($opt eq '-output_dir') {
-	$opt=shift;
-        $output_dir = $opt
-		if(-e $opt);
-	$output_dir .= '/'
-		unless(	(not(defined $output_dir)) || 
-			($output_dir eq '') || 
-			($output_dir =~ /\s+/) || 
-			($output_dir =~ /\/$/) );
-    } elsif ($opt eq '-dbms_host') {
-        $dbms_host = shift;
-    } elsif ($opt eq '-dbms_port') {
-	$opt=shift;
-        $dbms_port = (int($opt)) ? $opt : undef;
     } else {
         die "Unknown option: $opt\n$Usage";
     };
@@ -211,28 +147,19 @@ if($strawman) {
 $pt = 'RDFStore::Parser::'.$pt;
 
 my $p=new ${pt}(
-				ErrorContext => 	3, 
-				Style => 		'RDFStore::Parser::Styles::MagicTie',
-				NodeFactory => 		new RDFStore::NodeFactory(),
-				Source	=> 		(defined $namespace) ?
+				ErrorContext 	=>		3, 
+				NodeFactory 	=> 		new RDFStore::NodeFactory(),
+				Source		=> 		(defined $namespace) ?
 								$namespace :
 								($stuff =~ /^-/) ? undef : $stuff,
-				bCreateBags =>		(defined $bagIDs) ? $bagIDs : undef,
-				GenidNumber => $cnt,
-				RDFCore_Issues	=>	$rdfcore,
-				store	=>	{
-							seevalues => 	$verbose,
-							options		=> 	{
-										Name	=> 	$output_dir.$storename,
-										Style	=>	$style,
-										Host =>	$dbms_host,
-										Port =>	$dbms_port,
-										Split	=>	$split,
-										Compression     =>      $compression,
-										FreeText     =>      $freetext,
-										Sync    => 1 }
-						}
-				);
+				bCreateBags 	=>		(defined $bagIDs) ? $bagIDs : undef,
+				GenidNumber 	=>		$cnt,
+				RDFCore_Issues	=>		$rdfcore,
+				Handlers        => {
+                   				Init    => \&init,
+                               			Final   => \&final,
+                               			Assert  => \&assert 
+				} );
 
 my $m;
 if($stuff =~ /^-/) {
@@ -263,4 +190,57 @@ if(	(defined $GenidNumberFile) &&
 
 if($serialise) {
 	print $m->toStrawmanRDF(),"\n";
+};
+
+sub init {
+	my ($expat,$statement) = @_;
+};
+
+sub final {
+	my ($expat,$statement) = @_;
+};
+
+sub assert {
+	my ($expat,$statement) = @_;
+
+	my ($s,$p,$o) = ($statement->subject,$statement->predicate,$statement->object);
+	
+	if($s->getLocalName =~ /^genid/) {
+		print anonNode($s);
+	} else {
+		print uriref($s);
+	};
+	print " ";
+	print uriref($p);
+	print " ";
+	if($o->isa("RDFStore::Stanford::Resource")) {
+		if($o->getLocalName =~ /^genid/) {
+			print anonNode($o);
+		} else {
+			print uriref($o);
+		};
+	} else {
+		print qLiteral($o);
+	};
+	print " .\n";
+};
+
+sub anonNode {
+	return '_:'.$_[0]->getLocalName;
+};
+
+sub uriref {
+	return '<'.$_[0]->toString.'>';
+};
+
+sub qLiteral {
+	my ($lit) = @_;
+
+	my $str = $lit->toString;
+	$str =~ s/\\/\\\\/mg;
+	$str =~ s/\"/\\\"/mg;
+	$str =~ s/\n/\\n/mg;
+	$str =~ s/\r/\\r/mg;
+	$str =~ s/\t/\\t/mg;
+	return '"'.$str.'"';
 };

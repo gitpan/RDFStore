@@ -13,7 +13,7 @@
 
 package RDF;
 {
-use vars qw ( $VERSION $Description $parseType $about $resource $aboutEach $aboutEachPrefix $ID $Statement $Alt $object $subject $value $predicate $Property $Seq $type $Bag );
+use vars qw ( $VERSION $Statement $Alt $object $subject $value $predicate $Property $Seq $type $Bag );
 $VERSION='0.4';
 use strict;
 

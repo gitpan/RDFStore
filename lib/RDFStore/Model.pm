@@ -48,6 +48,11 @@
 # *		- removed RDFStore::Stanford::Resource inheritance
 # *     version 0.41
 # *             - updated _getLookupValue() and _getValuesFromLookup() to consider negative hashcodes
+# *     version 0.42
+# *		- complete redesign of the indexing method up to free-text search on literals
+# *		- added tied array iterator RDFStore::Model::Statements to allow fetching results one by one
+# *		- modified find() to allow a 4th paramater to make free-text search over literals
+# *
 # *
 
 package RDFStore::Model;
@@ -55,7 +60,7 @@ package RDFStore::Model;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.41';
+$VERSION = '0.42';
 
 use Carp;
 use RDFStore::Stanford::Digest;
@@ -65,96 +70,125 @@ use RDFStore::Literal;
 use RDFStore::Statement;
 use RDFStore::NodeFactory;
 use RDFStore::Stanford::Digest::Util;
-use Data::MagicTie;
+use Data::MagicTie; # the storge module
 
 @RDFStore::Model::ISA = qw( RDFStore::Stanford::Model RDFStore::Stanford::Digest RDFStore::Stanford::Digest::Digestable );
 
 sub new {
-	my ($pkg,%params) = @_;
+        my ($pkg,%params) = @_;
+ 
+        my $self = {};
+ 
+        # first operation creates lookup table
+        $self->{nodeFactory}=(  (exists $params{nodeFactory}) &&
+                                (defined $params{nodeFactory}) &&
+                                (ref($params{nodeFactory})) &&
+                                ($params{nodeFactory}->isa("RDFStore::Stanford::NodeFactory")) ) ?
+                                $params{nodeFactory} : new RDFStore::NodeFactory();
+	
+        $self->{options} = \%params;
 
-    	my $self = {};
-
-    	# first find operation creates lookup table
-    	$self->{nodeFactory}=(	(exists $params{nodeFactory}) &&
-				(defined $params{nodeFactory}) && 
-				(ref($params{nodeFactory})) &&
-				($params{nodeFactory}->isa("RDFStore::Stanford::NodeFactory")) ) ? 
-				$params{nodeFactory} : new RDFStore::NodeFactory();
-
-	eval {
-		# I am quite sure that Data::MagicTie and RDFStore::Model can be "merged" in the next release...
-		my $shared = $params{Shared}
-			if(	(exists $params{Shared}) &&
-				(defined $params{Shared}) &&
-				(ref($params{Shared})) &&
-				($params{Shared}->isa("RDFStore::Model")) );
-
-		# lookup tables
-		$self->{resources}={}; # contains a look-up table hashCode -->URI String
-		$self->{sp2o}={}; # all human sensible/readable stuff goes here  - values are bare bone strings :)
-		$self->{po2s}={}; # values are first key in resources table
-		$self->{so2p}={}; # values are first key in resources table
-
-		my $orig_name = $params{Name}
-			if(	(exists $params{Name}) &&
-				(defined $params{Name}) &&
-				($params{Name} ne '') &&
-				($params{Name} !~ m/^\s+$/) );
-
-		#unique
-		delete($params{Duplicates});
-		$params{Name} = $orig_name.'/resources'
-			if(defined $orig_name);
-
-		$params{Shared} = $shared->{resources_db}
-			if(defined $shared);
-        	$self->{resources_db} = tie %{$self->{resources}},'Data::MagicTie',%params;
-		$params{Resources}=$self->{resources_db}->get_Options;
-
-		#use duplicates for these
-		$params{Duplicates}=1;
-
-		$params{Name} = $orig_name.'/index1'
-			if(defined $orig_name);
-		$params{Shared} = $shared->{sp2o_db}
-			if(defined $shared);
-        	$self->{sp2o_db} = tie %{$self->{sp2o}},'Data::MagicTie',%params;
-		$params{Index1}=$self->{sp2o_db}->get_Options;
-
-		$params{Name} = $orig_name.'/index2'
-			if(defined $orig_name);
-		$params{Shared} = $shared->{po2s_db}
-			if(defined $shared);
-        	$self->{po2s_db} = tie %{$self->{po2s}},'Data::MagicTie',%params;
-		$params{Index2}=$self->{po2s_db}->get_Options;
-
-		$params{Name} = $orig_name.'/index3'
-			if(defined $orig_name);
-		$params{Shared} = $shared->{so2p_db}
-			if(defined $shared);
-        	$self->{so2p_db} = tie %{$self->{so2p}},'Data::MagicTie',%params;
-		$params{Index3}=$self->{so2p_db}->get_Options;
-
-		#we should either separate the Data::MagicTie options or zap the ones not needed
-		delete($params{Duplicates});
-
-		$params{Shared} = $shared
-			if(defined $shared);
-
-		$self->{options} = \%params;
-
-		# we keep IDs of queries :)
-		$self->{result}={};
-		$self->{result_db} = tie %{$self->{result}},'Data::MagicTie', Duplicates => 1;
-	};
-	croak "Cannot tie my database storage ".$params{Name}." :( - $! $@\n"
-		if $@;
-
-	$self->{copies}=0;
-
-    	bless $self,$pkg;
+        bless $self,$pkg;
 };
 
+# connect/create/attach to the database
+sub _tie {
+        my ($class) = @_;
+ 
+	return $_[0]->{Shared}->_tie
+		if(	(exists $_[0]->{Shared}) &&
+			(defined $_[0]->{Shared}) );
+        eval {
+                # lookup tables
+                $class->{literals} = {}; # literals
+                $class->{resources} = {}; #resources
+                $class->{namespaces} = {}; #namespaces
+                $class->{statements} = {}; #statements
+                $class->{Windex} = {}; # a sparse 3 dimensional matrix that apply a free-text like indexing to triples
+		my $orig_name = $class->{options}->{Name}
+                        if(     (exists $class->{options}->{Name}) &&
+                                (defined $class->{options}->{Name}) &&
+                                ($class->{options}->{Name} ne '') &&
+                                ($class->{options}->{Name} !~ m/^\s+$/) );
+ 
+                #we separate the Data::MagicTie options and zap the ones not needed
+                my %params = %{$class->{options}};
+ 
+                $params{Name} = $orig_name.'/literals'
+                        if(defined $orig_name);
+                $class->{literals_db} = tie %{$class->{literals}},'Data::MagicTie',%params;
+                $class->{options}->{Literals}=$class->{literals_db}->get_Options;
+
+		$params{Name} = $orig_name.'/resources'
+                        if(defined $orig_name);
+                $class->{resources_db} = tie %{$class->{resources}},'Data::MagicTie',%params;
+                $class->{options}->{Resources}=$class->{resources_db}->get_Options;
+ 
+                $params{Name} = $orig_name.'/namespaces'
+                        if(defined $orig_name);
+                $class->{namespaces_db} = tie %{$class->{namespaces}},'Data::MagicTie',%params;
+                $class->{options}->{Namespaces}=$class->{namespaces_db}->get_Options;
+
+		$params{Name} = $orig_name.'/statements'
+                        if(defined $orig_name);
+                $class->{statements_db} = tie %{$class->{statements}},'Data::MagicTie',%params;
+                $class->{options}->{Statements}=$class->{statements_db}->get_Options;
+ 
+                #initialize statements counter(s) if necessary
+                my $cnt = $class->{statements}->{add_counter}; #FETCH
+                $class->{statements}->{add_counter}=-1 #STORE
+                        unless(	(defined $cnt) &&
+				(int($cnt)) );
+                $cnt = $class->{statements}->{remove_counter}; #FETCH
+                $class->{statements}->{remove_counter}=-1 #STORE
+                        unless(	(defined $cnt) &&
+				(int($cnt)) );
+ 
+                $params{Name} = $orig_name.'/Windex'
+                        if(defined $orig_name);
+                $class->{Windex_db} = tie %{$class->{Windex}},'Data::MagicTie',%params;
+                $class->{options}->{Windex}=$class->{Windex_db}->get_Options;
+        };
+        if($@) {
+                warn "Cannot tie my database storage ".$class->{options}->{Name}." :( - $! $@\n";
+                return;
+        } else {
+                return $class;
+        };
+};     
+
+# diconnect from the database
+sub _untie {
+	return $_[0]->{Shared}->_untie
+		if(	(exists $_[0]->{Shared}) &&
+			(defined $_[0]->{Shared}) );
+
+        delete $_[0]->{literals_db};
+        untie %{$_[0]->{literals}};
+        delete $_[0]->{resources_db};
+        untie %{$_[0]->{resources}};
+        delete $_[0]->{namespaces_db};
+        untie %{$_[0]->{namespaces}};
+        delete $_[0]->{statements_db};
+        untie %{$_[0]->{statements}};
+        delete $_[0]->{Windex_db};
+        untie %{$_[0]->{Windex}};
+}; 
+
+# check if the database is connected
+sub _tied {
+	return $_[0]->{Shared}->_tied
+		if(	(exists $_[0]->{Shared}) &&
+			(defined $_[0]->{Shared}) );
+
+        return (        (tied %{$_[0]->{literals}}) &&
+                        (tied %{$_[0]->{resources}}) &&
+                        (tied %{$_[0]->{namespaces}}) &&
+                        (tied %{$_[0]->{statements}}) &&
+                        (tied %{$_[0]->{Windex}}) ) ? 1 : 0;
+};
+
+# return model options
 sub getOptions {
 	return %{$_[0]->{'options'}};
 };
@@ -171,172 +205,348 @@ sub toString {
         return "Model[".$_[0]->getSourceURI()."]";
 };
 
-# Set a base URI
+# Set a base URI for the model
 sub setSourceURI {
 	$_[0]->{uri}=$_[1];
 };
 
-# Returns current base URI setting
+# Returns current base URI for the model
 sub getSourceURI {
 	return $_[0]->{uri};
 };
 
-# Model access
-#
-# Number of triples in the model
+# model access methods
+
+# return the number of triples in the model
 sub size {
-	if(	(exists $_[0]->{options}->{Shared}) &&
-		(defined $_[0]->{options}->{Shared}) ) {
-		my @ids = $_[0]->{result_db}->get_dup('subjects');
-		return $#ids;
-	} else {
-		# really not efficient :-(
-		my $size = keys %{$_[0]->{po2s}}; #reset iterator
-		return scalar keys %{$_[0]->{po2s}}; #count elements
-	};
-};
-
-sub isEmpty {
-	my $fk;
-	if(	(exists $_[0]->{options}->{Shared}) &&
-		(defined $_[0]->{options}->{Shared}) ) {
-		$fk = $_[0]->{result_db}->{subjects}; # should be one in-memory fetch
-	} else {
-		#reset iterator
-		my $size = keys %{$_[0]->{po2s}}; #reset iterator
-		$fk = $_[0]->{po2s_db}->FIRSTKEY(); #FIRSTKEY
-	};
-	return (defined $fk) ? 0 : 1;
-};
-
-sub elements {
-	# the problem now is with reading in-memory all the results in both cases :(
-	# but we could return a tied Data::MagciTie per component that actually fetch things...
-	#
-
-	my @statements;
-	if(	(exists $_[0]->{options}->{Shared}) &&
-		(defined $_[0]->{options}->{Shared}) ) {
-		#to be finished.....
-	} else {
-		my $object_code;
-		foreach $object_code ( keys %{$_[0]->{sp2o}} ) {
-			my $object=$_[0]->{sp2o}->{$object_code}; #FETCH
-               		if(     (defined $object) &&
-                		(       (ref($object)) ||
-                       		( ($object =~ s/^\"//) && ($object =~ s/\"$//) ) ) ) {
-                		$object = $_[0]->{nodeFactory}->createLiteral($object);
-                	} elsif(        (defined $object) &&
-                			(int($object)) ) {
-                		$object = $_[0]->{resources}->{ $object }; #FETCH
-                       		$object = $_[0]->{nodeFactory}->createResource($object)
-                			if(defined $object);
-                	} else {
-				next;
-                	};
-			my ($subject_code,$predicate_code)=$_[0]->_getValuesFromLookup($object_code);
-			my $subject=$_[0]->{resources}->{$subject_code}; #FETCH
-			my $predicate=$_[0]->{resources}->{$predicate_code}; #FETCH
-			$subject=$_[0]->{nodeFactory}->createResource($subject);
-			$predicate=$_[0]->{nodeFactory}->createResource($predicate);
-			push @statements, $_[0]->{nodeFactory}->createStatement($subject,$predicate,$object);
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		if(exists $_[0]->{query_model_statement_ids}) {
+			if($#{$_[0]->{query_model_statement_ids}}>=0) {
+				return $#{$_[0]->{query_model_statement_ids}}+1; #save a FETCH
+			} else {
+				return 0; #got an empty query
+			};
+		} else {
+			return $_[0]->{Shared}->size; #i.e. shared model coming from a duplicate()
 		};
 	};
-	return wantarray ? @statements : $statements[0];
+
+        $_[0]->_tie
+               	unless($_[0]->_tied);
+
+        (	($_[0]->{statements}->{add_counter}+1)-($_[0]->{statements}->{remove_counter}+1)); #FETCH*2
 };
 
-# Tests if the model contains the given triple.
+# check whether or not the model is empty
+sub isEmpty {
+        return ($_[0]->size() > 0) ? 0 : 1;
+};
+
+# return a tied ARRAY (iterator) of statements actually in the database - see RDFStore::Model::Statements(3)
+sub elements {
+	my ($class,@ids) = @_;
+
+	@ids=() #hack
+		unless((caller)[0]=~/RDFStore::Model/);
+
+	my $statements;
+	if(	(exists $class->{Shared}) &&
+		(defined $class->{Shared}) ) {
+		return
+			if(	(exists $class->{query_model_statement_ids}) &&
+				($#{$class->{query_model_statement_ids}}<0) ); #we do not return empty queries
+
+		($statements)=$class->{Shared}->elements( 
+			($#ids>=0) ? 
+				@ids : 
+				(	(exists $class->{query_model_statement_ids}) ?
+						@{$class->{query_model_statement_ids}} : () )
+		);
+	} else {
+        	$class->_tie
+        		unless($class->_tied);
+
+		$statements=[];
+        	tie @{$statements},"RDFStore::Model::Statements",$class,@ids;
+	};
+
+        return wantarray ? $statements : $statements->[0]; #FETCH one single statement in scalar context
+};
+
+# tests if the model contains a given statement
 sub contains {
-	return (	(defined $_[1]) && (ref($_[1])) && 
-			($_[1]->isa("RDFStore::Stanford::Statement")) &&
-			(exists($_[0]->{po2s}->{  #EXISTS
-				$_[0]->_getLookupValue(  
-						scalar($_[1]->predicate->hashCode()),
-						scalar($_[1]->object->hashCode()) ) })) ) ? 1 : 0;
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		if(exists $_[0]->{query_model_statement_ids}) {
+			if($#{$_[0]->{query_model_statement_ids}}<0) {
+				return 0; #got an empty query
+			} else {
+				my ($subject_localname_code,$subject_namespace_code) = map {
+                			$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
+        			my ($predicate_localname_code,$predicate_namespace_code) = map {
+                			$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
+        			my ($object_localname_code,$object_namespace_code,$object_literal_code);
+        			if(     (defined $_[1]->object) &&
+                			($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
+                			($object_localname_code,$object_namespace_code) = map {
+                        		$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
+        			} elsif(defined $_[1]->object) {
+                			$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
+        			};
+        			my($num)=$_[0]->{Shared}->_fetchRDFNode(	$subject_localname_code,
+						$subject_namespace_code,
+						$predicate_localname_code,
+						$predicate_namespace_code,
+						$object_localname_code,
+						$object_namespace_code,
+						$object_literal_code);
+				return (grep /^$num$/,@{$_[0]->{query_model_statement_ids}}) ? 1 : 0;
+			};
+		} else {
+			return $_[0]->{Shared}->contains($_[1]); #i.e. shared model coming from a duplicate()
+		};
+	};
+
+        $_[0]->_tie
+                unless($_[0]->_tied);
+ 
+        if(	(defined $_[1]) &&
+                (ref($_[1])) &&
+                ($_[1]->isa("RDFStore::Stanford::Statement")) ) {
+		my ($subject_localname_code,$subject_namespace_code) = map {
+                	$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
+        	my ($predicate_localname_code,$predicate_namespace_code) = map {
+                	$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
+        	my ($object_localname_code,$object_namespace_code,$object_literal_code);
+        	if(     (defined $_[1]->object) &&
+                	($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
+                	($object_localname_code,$object_namespace_code) = map {
+                        	$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
+        	} elsif(defined $_[1]->object) {
+                	$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
+        	};
+        	return ($_[0]->_fetchRDFNode(	$subject_localname_code,
+						$subject_namespace_code,
+						$predicate_localname_code,
+						$predicate_namespace_code,
+						$object_localname_code,
+						$object_namespace_code,
+						$object_literal_code)) ? 1 : 0;
+	} else {
+		return 0;
+	};
 };
 
 # Model manipulation: add, remove, find
 #
+# NOTE: it is not really safe here - we might need to lock all DBs, add statement, unlock and return (TXP) :)
+#
 # Adds a new triple to the model
 sub add {
-	my ($class, $subject,$predicate,$object) = @_;
+        my ($class, $subject,$predicate,$object) = @_;
 
-	croak "Subject or Statement ".$subject." is not either instance of RDFStore::Stanford::Statement or RDFStore::Stanford::Resource"
-                unless(	(defined $subject) && 
-			(ref($subject)) && 
-			(	($subject->isa('RDFStore::Stanford::Resource')) || 
-				($subject->isa('RDFStore::Stanford::Statement')) ) );
+        croak "Subject or Statement ".$subject." is either not instance of RDFStore::Stanford::Statement or RDFStore::Stanford::Resource"
+                unless( (defined $subject) &&
+                        (ref($subject)) &&
+                        (       ($subject->isa('RDFStore::Stanford::Resource')) ||
+                                ($subject->isa('RDFStore::Stanford::Statement')) ) );
 	croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
-                unless(	(not(defined $predicate)) || 
-			(	(defined $predicate) &&
-				(ref($predicate)) && 
-				($predicate->isa('RDFStore::Stanford::Resource')) &&
-				($subject->isa('RDFStore::Stanford::Resource')) ) );
-	croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
-                unless(	(not(defined $object)) || 
-			( ( ( (defined $object) && 
-                              (ref($object)) && 
+                unless( (not(defined $predicate)) ||
+                        (       (defined $predicate) &&
+                                (ref($predicate)) &&
+                                ($predicate->isa('RDFStore::Stanford::Resource')) &&
+                                ($subject->isa('RDFStore::Stanford::Resource')) ) );
+        croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
+                unless( (not(defined $object)) ||
+                        ( ( ( (defined $object) &&
+                              (ref($object)) &&
                               ($object->isa('RDFStore::Stanford::RDFNode'))) ||
-			    ( (defined $object) && 
+                            ( (defined $object) &&
                               ($object !~ m/^\s+$/)) ) && #should work also for BLOBs
-			  ($subject->isa('RDFStore::Stanford::Resource')) &&
-			  ($predicate->isa('RDFStore::Stanford::Resource')) ) );
+                          ($subject->isa('RDFStore::Stanford::Resource')) &&
+                          ($predicate->isa('RDFStore::Stanford::Resource')) ) );
 
-	if( 	(defined $subject) &&
-		(ref($subject)) && 
-		($subject->isa("RDFStore::Stanford::Statement")) ) {
-		($subject,$predicate,$object) = ($subject->subject, $subject->predicate, $subject->object);
-	} elsif(	(defined $object) && 
-			(!(ref($object))) ) {
-			$object = $class->{nodeFactory}->createLiteral($object);
+        if(     (defined $subject) &&
+                (ref($subject)) &&
+                ($subject->isa("RDFStore::Stanford::Statement")) ) {
+                ($subject,$predicate,$object) = ($subject->subject, $subject->predicate, $subject->object);
+        } elsif(        (defined $object) &&
+                        (!(ref($object))) ) {
+                        $object = $class->{nodeFactory}->createLiteral($object);
+        };
+
+        my ($subject_localname_code,$subject_namespace_code) = map {
+                        $class->_getLookupValue($_); } $subject->hashCode();
+
+        my ($predicate_localname_code,$predicate_namespace_code) = map {
+                        $class->_getLookupValue($_); } $predicate->hashCode();
+
+        my ($object_localname_code,$object_namespace_code,$object_literal_code);
+        if($object->isa("RDFStore::Stanford::Resource")) {
+                ($object_localname_code,$object_namespace_code) = map {
+                        $class->_getLookupValue($_); } $object->hashCode();
+	} else {
+                $object_literal_code = $class->_getLookupValue($object->hashCode());
+        };
+
+	#we do not want want duplicates
+	return
+		if($class->_fetchRDFNode(	$subject_localname_code,
+						$subject_namespace_code,
+						$predicate_localname_code,
+						$predicate_namespace_code,
+						$object_localname_code,
+						$object_namespace_code,
+						$object_literal_code));
+
+	$class->_tie
+                unless($class->_tied);
+ 
+	# copy across stuff if necessary
+	$class->_copyOnWrite
+		if(	(exists $class->{Shared}) &&
+                	(defined $class->{Shared}) );
+
+	# store the STATEMENT
+	#
+        # I.e.
+        #
+        # $class->{statements}->{ $st_num*8 } = (
+        #       $subject_localname_code,
+        #       $subject_namespace_code,
+        #       $predicate_localname_code,
+        #       $predicate_namespace_code,
+        #       $object_localname_code,
+        #       $object_namespace_code,
+        #       $object_literal_code
+	#	[,$context]	# id of statement giving context
+        # );
+        #
+	# $class->{namespaces}->{ $predicate_namespace_code } = 'http://dublincore.org/elements/1.1/';
+	#
+	# $class->{resources}->{ $predicate_localname_code } = 'creator';
+	#
+	# $class->{literals}->{ $object_literal_code } = 'webmaster@somewhere.org';
+	#
+	# $class->{Windex}->{ $subject_localname_code } = 76453; # 3D sparse matrix
+	# $class->{Windex}->{ $subject_namespace_code } = 24999; # and so on....
+	
+        # count one more - it must be atomic/fault tolerant
+        my $st_id = $class->{statements_db}->inc('add_counter'); #inc
+
+	#use 8 slots
+        my $bitno=$st_id*8;
+ 
+	# store subject LOCALNAME
+        $class->{resources}->{$subject_localname_code} = $subject->getLocalName         #STORE
+               	if(     (defined $subject_localname_code) &&
+                       	(!(exists $class->{resources}->{$subject_localname_code})) );   #EXISTS
+
+	# store subject NAMESPACE
+       	$class->{namespaces}->{$subject_namespace_code} = $subject->getNamespace        #STORE
+               	if(     (defined $subject_namespace_code) &&
+                       	(!(exists $class->{namespaces}->{$subject_namespace_code})) );  #EXISTS
+ 
+	# store predicate LOCALNAME
+        $class->{resources}->{$predicate_localname_code} = $predicate->getLocalName       #STORE
+               	if(     (defined $predicate_localname_code) &&
+                       	(!(exists $class->{resources}->{$predicate_localname_code})) );   #EXISTS
+
+	# store predicate NAMESPACE
+       	$class->{namespaces}->{$predicate_namespace_code} = $predicate->getNamespace      #STORE
+               	if(     (defined $predicate_namespace_code) &&
+                       	(!(exists $class->{namespaces}->{$predicate_namespace_code})) );  #EXISTS
+ 
+        if($object->isa("RDFStore::Stanford::Resource")) {
+		# store object LOCALNAME
+        	$class->{resources}->{$object_localname_code} = $object->getLocalName        #STORE
+        		if(     (defined $object_localname_code) &&
+               			(!(exists $class->{resources}->{$object_localname_code})) ); #EXISTS
+
+		# store object NAMESPACE
+       		$class->{namespaces}->{$object_namespace_code} = $object->getNamespace         #STORE
+        		if(     (defined $object_namespace_code) &&
+               			(!(exists $class->{namespaces}->{$object_namespace_code})) );  #EXISTS
+	} else {
+                # store LITERAL/BLOB
+                $class->{literals}->{$object_literal_code} = $object->getContent                #STORE (BLOBs also :)
+                        if(     (defined $object_literal_code) &&
+                                (!(exists $class->{literals}->{$object_literal_code})) );       #EXISTS
+
+		#free-text search on literals stuff
+		if(	(!(ref($object->getContent))) &&
+			($object->getContent ne '') &&
+			(	(exists $class->{options}->{FreeText}) &&
+				($class->{options}->{FreeText}==1) ) ) {
+        		my $Windex;
+			foreach my $word (grep !/\s+/, split /\b/m,$object->getContent) { #do not consider white spaces
+				$Windex='';
+				$Windex=(	(exists $class->{options}->{Compression}) &&  
+						($class->{options}->{Compression}==1) ) ?
+					$class->_decode( $class->{Windex}->{$word} ) :
+					$class->{Windex}->{$word} #FETCH
+					if(exists $class->{Windex}->{$word}); #EXISTS
+				vec($Windex,$bitno+6,1)|=1;
+
+				$class->{Windex}->{$word}=(	(exists $class->{options}->{Compression}) &&
+								($class->{options}->{Compression}==1) ) ?
+						$class->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
 	};
 
-	my ($subject_code,$predicate_code,$object_code) = (
-                        (defined $subject) ? scalar($subject->hashCode()) : undef,
-                        (defined $predicate) ? scalar($predicate->hashCode()) : undef,
-                        (defined $object) ? scalar($object->hashCode()) : undef );
+#print STDERR "add) CODES($subject_localname_code,$subject_namespace_code,$predicate_localname_code,$predicate_namespace_code,$object_localname_code,$object_namespace_code,$object_literal_code)\n";
 
-	my $sp_code = $class->_getLookupValue($subject_code,$predicate_code);
-	my $po_code = $class->_getLookupValue($predicate_code,$object_code);
-	my $so_code = $class->_getLookupValue($subject_code,$object_code);
+        my $Windex;
+	foreach my $idx ( 	$subject_localname_code, 	#0
+				$subject_namespace_code,	#1
+				$predicate_localname_code,	#2
+				$predicate_namespace_code,	#3
+				$object_localname_code,		#4
+				$object_namespace_code,		#5
+				$object_literal_code ) {	#6
+		if(defined $idx) {
+			$class->{statements}->{$class->_getLookupValue($bitno)} = $idx		# STORE
+                		if(!(exists $class->{statements}->{$class->_getLookupValue($bitno)}));	#EXISTS
 
-	# store them
-	# store resources if necessary - an EXISTS operation is always required
-	$class->{resources}->{$subject_code} = $subject->toString		#STORE
-		unless(exists $class->{resources}->{$subject_code}); 		#EXISTS
-	$class->{resources}->{$predicate_code} = $predicate->toString 		#STORE
-		unless(exists $class->{resources}->{$predicate_code}); 		#EXISTS
+			# store WINDEX
+#print STDERR "B) ($st_id/$bitno)-->unpacked='",unpack("b*",$class->_decode( $class->{Windex}->{$idx} )),"'\n";
 
-	#object_code is the same either for RDFStore::Literal or RDFStore::Resource
-	$class->{resources}->{$object_code} = $object->toString			#STORE
-		if(	($object->isa("RDFStore::Stanford::Resource")) &&
-			(!(exists $class->{resources}->{$object_code})) );	#EXISTS
+        		$Windex='';
+			$Windex=(      (exists $class->{options}->{Compression}) &&  
+                                        ($class->{options}->{Compression}==1) ) ?
+					$class->_decode( $class->{Windex}->{$idx} ) :
+					$class->{Windex}->{$idx} #FETCH
+				if(exists $class->{Windex}->{$idx}); #EXISTS
+			vec($Windex,$bitno,1)|=1;
 
-	# store indexes - we AVOID repeated values per multiple key for indexes
-	# NOTE: fetch in-memory internally in Data::MagicTie if style DBMS :(
-	my $obj_value = (	(ref($object)) && 
-				($object->isa("RDFStore::Stanford::Resource")) ) ?
-				scalar($object->hashCode()) :
-				(ref($object->toString)) ?
-					$object->toString : # store generic BLOBs by using Data::MagicTie :)
-					'"'.$object->toString.'"';
-	$class->{sp2o}->{ $sp_code } = $obj_value #STORE
-		if($class->{sp2o_db}->find_dup($sp_code,$obj_value)==1); #find_dup
-	$class->{po2s}->{ $po_code } = scalar($subject->hashCode()) #STORE
-		if($class->{po2s_db}->find_dup($po_code,scalar($subject->hashCode()))==1); #find_dup
-	$class->{so2p}->{ $so_code } = scalar($predicate->hashCode())	#STORE
-		if($class->{so2p_db}->find_dup($so_code,scalar($predicate->hashCode()))==1); #find_dup
+#print STDERR "B1) ($st_id/$bitno)-->unpacked='",unpack("b*",$Windex),"'\n";
 
-	if(	(exists $class->{options}->{Sync}) &&
-		(defined $class->{options}->{Sync}) ) {
-		#sync :(
-		$class->{resources_db}->sync();
-		$class->{sp2o_db}->sync();
-		$class->{po2s_db}->sync();
-		$class->{so2p_db}->sync();
+			$class->{Windex}->{$idx}=(      (exists $class->{options}->{Compression}) &&  
+                                        		($class->{options}->{Compression}==1) ) ?
+							$class->_encode($Windex) :
+							$Windex; #STORE
+
+#print STDERR "A) ($st_id/$bitno)-->unpacked='",unpack("b*",$class->_decode( $class->{Windex}->{$idx} )),"'\n\n";
+		};
+		$bitno++;
 	};
 
-	$class->updateDigest($subject,$predicate,$object);
+#print STDERR $st_id,"/",$bitno-1,"\n";
+ 
+        if(     (exists $class->{options}->{Sync}) &&
+                (defined $class->{options}->{Sync}) ) {
+                #sync :(
+                $class->{literals_db}->sync();
+                $class->{resources_db}->sync();
+                $class->{namespaces_db}->sync();
+                $class->{statements_db}->sync();
+                $class->{Windex_db}->sync();
+        };
+ 
+        $class->updateDigest($subject,$predicate,$object);
 };
 
 sub updateDigest {
@@ -350,45 +560,264 @@ sub updateDigest {
 };
 
 # Removes the triple from the model
+# NOTE: it is not really safe here - we might need to lock all DBs, del statement, unlock and return (TXP) :)
 sub remove {
-	croak "Statement ".$_[1]." is not instance of RDFStore::Stanford::Statement"
-                unless(	(defined $_[1]) && 
-			(ref($_[1])) && 
-			($_[1]->isa('RDFStore::Stanford::Statement')) );
+        croak "Statement ".$_[1]." is not instance of RDFStore::Stanford::Statement"
+                unless( (defined $_[1]) &&
+                        (ref($_[1])) &&
+                        ($_[1]->isa('RDFStore::Stanford::Statement')) );
+ 
+        $_[0]->_tie
+                unless($_[0]->_tied);
+ 
+	# copy across stuff if necessary
+	$_[0]->_copyOnWrite
+		if(	(exists $_[0]->{Shared}) &&
+                	(defined $_[0]->{Shared}) );
 
-	# NOTE: it is not really safe here - we might need to lock all the three DBs, del statement, unlock and return (TXP) :)
-	# we do not zap any resource...it does not matter for the moment due we should save a lot of disk space anyway :)
-	$_[0]->{sp2o_db}->del_dup( 
-		$_[0]->_getLookupValue(	
-			scalar($_[1]->subject->hashCode()),
-			scalar($_[1]->predicate->hashCode()) ),
-				(	(ref($_[1]->object)) && 
-					($_[1]->object->isa("RDFStore::Stanford::Resource")) ) ?
-					scalar($_[1]->object->hashCode()) :
-					(ref($_[1]->object->toString)) ?
-					$_[1]->object->toString : #zap BLOBs
-					'"'.$_[1]->object->toString.'"' );
-	$_[0]->{po2s_db}->del_dup( 
-		$_[0]->_getLookupValue(	
-			scalar($_[1]->predicate->hashCode()),
-			scalar($_[1]->object->hashCode()) ),
-				scalar($_[1]->subject->hashCode()) );
-	$_[0]->{so2p_db}->del_dup( 
-		$_[0]->_getLookupValue(	
-			scalar($_[1]->subject->hashCode()),
-			scalar($_[1]->object->hashCode()) ),
-				scalar($_[1]->predicate->hashCode()) );
+	# remove the STATEMENT
+	#
+	# I.e.
+	#	1) find the statement
+	#	2) if the statement is *unique* remove it
+	#
+	#	NOTE: unique means that no other statements have *exaclty* the same properties
+	#
 
-	if(	(exists $_[0]->{options}->{Sync}) &&
-		(defined $_[0]->{options}->{Sync}) ) {
-		#sync :(
-		#$_[0]->{resources_db}->sync();
-		$_[0]->{sp2o_db}->sync();
-		$_[0]->{po2s_db}->sync();
-		$_[0]->{so2p_db}->sync();
+	my ($subject_localname_code,$subject_namespace_code) = map {
+               	$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
+        my ($predicate_localname_code,$predicate_namespace_code) = map {
+               	$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
+        my ($object_localname_code,$object_namespace_code,$object_literal_code);
+        if(     (defined $_[1]->object) &&
+               	($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
+               	($object_localname_code,$object_namespace_code) = map {
+                       	$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
+        } elsif(defined $_[1]->object) {
+               	$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
+        };
+	my($st_id)=$_[0]->_fetchRDFNode(	$subject_localname_code,
+						$subject_namespace_code,
+						$predicate_localname_code,
+						$predicate_namespace_code,
+						$object_localname_code,
+						$object_namespace_code,
+						$object_literal_code);
+	if(defined $st_id) {
+#print STDERR "Removing ",$_[1]->toString,"($st_id)....";
+
+		#removed one statement
+		$_[0]->{statements_db}->inc('remove_counter'); #inc
+
+		#remove  subject localname
+		my $bitno=$st_id*8;
+		my $id=$_[0]->_getLookupValue($bitno);
+		my $oid;
+        	my $Windex;
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode($oid))>1) {
+					delete($_[0]->{resources}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&  
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  subject namespace
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode(undef,$oid))>1) {
+					delete($_[0]->{namespaces}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  predicate localname
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode(undef,undef,$oid))>1) {
+					delete($_[0]->{resources}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  predicate namespace
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,$oid))>1) {
+					delete($_[0]->{namespaces}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  object localname
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,$oid))>1) {
+					delete($_[0]->{resources}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  object namespace
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,$oid))>1) {
+					delete($_[0]->{namespaces}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+			};
+		};
+		#remove  object literal
+		$id=$_[0]->_getLookupValue(++$bitno);
+		if($oid = $_[0]->{statements}->{$id}) { #FETCH
+			delete($_[0]->{statements}->{$id}); #DELETE
+			if(defined $oid) {
+				my $content;
+				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,undef,$oid))>1) {
+					$content=$_[0]->{literals}->{$oid} #additional FETCH
+						if(	(exists $_[0]->{options}->{FreeText}) &&
+                                			($_[0]->{options}->{FreeText}==1) );
+					delete($_[0]->{literals}->{$oid}); #DELETE
+				};
+
+        			$Windex='';
+				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
+					$_[0]->{Windex}->{$oid} #FETCH
+					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
+				vec($Windex,$bitno,1)&=0; #reset to zero
+
+				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+						$_[0]->_encode($Windex) :
+						$Windex; #STORE
+
+				#remove free-text search stuff for literals
+                		if(     (defined $content) &&
+					(!(ref($content))) &&
+					($content ne '') &&
+					(     (exists $_[0]->{options}->{FreeText}) &&
+                                                        ($_[0]->{options}->{FreeText}==1) ) ) {
+                        		foreach my $word (grep !/\s+/, split /\b/m,$content) { #do not consider white spaces
+						if(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,undef,undef,$word))>1) {
+                                			$Windex='';
+                                			$Windex=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+                                        			$_[0]->_decode( $_[0]->{Windex}->{$word} ) :
+                                        			$_[0]->{Windex}->{$word} #FETCH
+                                        			if(exists $_[0]->{Windex}->{$word}); #EXISTS
+                                			vec($Windex,$bitno,1)&=0; #reset to zero
+
+                                			$_[0]->{Windex}->{$word}=(      (exists $_[0]->{options}->{Compression}) &&
+                                        ($_[0]->{options}->{Compression}==1) ) ?
+                                                		$_[0]->_encode($Windex) :
+                                                		$Windex; #STORE
+						} else {
+							delete($_[0]->{Windex}->{$word}); #DELETE
+						};
+                        		};
+                		};
+			};
+		};
+
+#print STDERR "DONE!\n";
 	};
-
-	$_[0]->updateDigest($_[1]);
+	
+	if(     (exists $_[0]->{options}->{Sync}) &&
+                (defined $_[0]->{options}->{Sync}) ) {
+                #sync :(
+                $_[0]->{literals_db}->sync();
+                $_[0]->{resources_db}->sync();
+                $_[0]->{namespaces_db}->sync();
+                $_[0]->{statements_db}->sync();
+                $_[0]->{Windex_db}->sync();
+        };
+ 
+        $_[0]->updateDigest($_[1]);
 };
 
 sub isMutable {
@@ -397,141 +826,221 @@ sub isMutable {
 
 # General method to search for triples.
 # null input for any parameter will match anything.
-# Example: $result = $m->find( undef, $RDF::type, new RDFStore::Resource("http://...#MyClass") );
-# finds all instances of in the model
+# Example: $result = $m->find( undef, $RDF::type, new RDFStore::Resource("http://...#MyClass"), [word] );
+# finds all instances in the model
 sub find {
-	my ($class,$subject,$predicate,$object) = @_;
+        my ($class,$subject,$predicate,$object,$object_literal_word) = @_;
 
-	croak "Subject ".$subject." is not instance of RDFStore::Stanford::Resource"
-                unless(	(not(defined $subject)) || 
-				( 	(defined $subject) &&
-					(ref($subject)) && 
-					($subject->isa('RDFStore::Stanford::Resource')) ) );
+        croak "Subject ".$subject." is not instance of RDFStore::Stanford::Resource"
+                unless(	(not(defined $subject)) ||
+                        (       (defined $subject) &&
+                                (ref($subject)) &&
+				($subject->isa('RDFStore::Stanford::Resource')) ) );
         croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
-                unless( (not(defined $predicate)) || 
-				(	(defined $predicate) &&
-					(ref($predicate)) && 
-					($predicate->isa('RDFStore::Stanford::Resource')) ) );
+                unless( (not(defined $predicate)) ||
+                                (       (defined $predicate) &&
+                                        (ref($predicate)) &&
+                                        ($predicate->isa('RDFStore::Stanford::Resource')) ) );
         croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
-                unless( (not(defined $object)) || 
-				(	(defined $object) &&
-					(ref($object)) && 
-					($object->isa('RDFStore::Stanford::RDFNode')) ) );
+                unless( (not(defined $object)) ||
+                                (       (defined $object) &&
+                                        (ref($object)) &&
+                                        ($object->isa('RDFStore::Stanford::RDFNode')) ) );
 
-	# we have the same problem like in Pen - a result set must be a model/collection :-)
-	my $res = $class->create(); #EMPTY MODEL
+	return
+		if(	(defined $object) &&
+			(defined $object_literal_word) &&
+			(     (exists $class->{options}->{FreeText}) &&
+                              ($class->{options}->{FreeText}==1) ) );
 
-	# we avoid this because is doing a FK :) - this is check might be safely skipped anyway
-        #return $res if($class->isEmpty());
+	# e.g. $class->find($subject,$predicate,$object)->find(....) and so on
+	# NOTE: this could be much improved avoid DB operations using shared_ids of properties.....
+	if(	(exists $class->{Shared}) &&
+		(defined $class->{Shared}) ) {
+		$class->{Shared}->{sharing_query_model_statement_ids}=$class->{query_model_statement_ids}
+			if(	(exists $class->{query_model_statement_ids}) &&
+				($#{$class->{query_model_statement_ids}}>=0) );
+		return $class->{Shared}->find($subject,$predicate,$object,$object_literal_word);
+	};
 
-	return $class->duplicate()
-		if(	(not(defined $subject)) && 
-			(not(defined $predicate)) && 
-			(not(defined $object)) );
+	$class->_tie
+                unless($class->_tied);
 
-	# add results to the query model
-	map {
-#print STDERR "model_find: '".$_->toString."'\n";
-		if(	(defined $subject) &&
-			(defined $predicate) ) {
-			$res->add($subject,$predicate,$_);
-		} elsif(	(defined $subject) &&
-				(defined $object) ) {
-			$res->add($subject,$_,$object);
-		} elsif(	(defined $predicate) &&
-				(defined $object) ) {
-			$res->add($_,$predicate,$object);
-		};
-	} $_[0]->fetchRDFNode($subject,$predicate,$object);
+        # we have the same problem like in Pen - a result set must be a model/collection :-)
+        my $res = $class->create(); #EMPTY MODEL
+
+	# we keep numbers of shared statements for queries :)
+	# NOTE: it is much better to keep in-memory just IDs of queries instead of add() full-blown statements
+	# it might be that a query model module or cache one would be preferred here in the future.....
+        $res->{query_model_statement_ids}=[];
+
+        return $res
+		if($class->isEmpty());
+
+	if(     (exists $class->{options}->{FreeText}) &&
+                              ($class->{options}->{FreeText}==1) ) {
+        	return $class->duplicate()
+                	if(     (not(defined $subject)) &&
+                        	(not(defined $predicate)) &&
+                        	(not(defined $object)) &&
+                        	(not(defined $object_literal_word)) );
+	} else {
+        	return $class->duplicate()
+                	if(     (not(defined $subject)) &&
+                        	(not(defined $predicate)) &&
+                        	(not(defined $object)) );
+	};
+
+	#share IDs till first write operation such as add() or remove() on query result model
+	# NOTE: sharing avoid add() full-blown statements to the result model
+	$res->{Shared}=$class;
+
+	my ($subject_localname_code,$subject_namespace_code) = map {
+                        $class->_getLookupValue($_); } $subject->hashCode()
+		if(defined $subject);
+        my ($predicate_localname_code,$predicate_namespace_code) = map {
+                        $class->_getLookupValue($_); } $predicate->hashCode()
+		if(defined $predicate);
+        my ($object_localname_code,$object_namespace_code,$object_literal_code);
+        if(     (defined $object) &&
+        	($object->isa("RDFStore::Stanford::Resource")) ) {
+                ($object_localname_code,$object_namespace_code) = map {
+                                $class->_getLookupValue($_); } $object->hashCode();
+        } elsif(defined $object) {
+        	$object_literal_code = $class->_getLookupValue($object->hashCode());
+        };
+
+        # fetch results keeping track of IDs
+	my(@ids);
+        map {
+                push @ids,$_;
+        } $class->_fetchRDFNode(	$subject_localname_code,
+					$subject_namespace_code,
+					$predicate_localname_code,
+					$predicate_namespace_code,
+					$object_localname_code,
+					$object_namespace_code,
+					$object_literal_code,
+					$object_literal_word);
+
+	if(exists $class->{sharing_query_model_statement_ids}) {
+		map {
+			my $a=$_;
+			push @{$res->{query_model_statement_ids}}, $a
+				if(grep /^$a$/,@ids);
+			} @{$class->{sharing_query_model_statement_ids}};
+		delete($class->{sharing_query_model_statement_ids});
+	} else {
+		push @{$res->{query_model_statement_ids}},@ids;
+	};
 
         return $res;
 };
 
-# Clone the model - So due that copy is expensive we use sharing :)
+# clone the model - So due that copy is expensive we use sharing :)
 sub duplicate {
 	my ($class) = @_;
 
-	# create and return a model that shares store and lookup with this model
-	my $self=ref($class);
-	my $new = $self->new( Shared => $class ); # Shared here means a little bit different than Data::MagicTie
-	return $new;
+        my $new = $class->create();
+
+        # return a model that shares store and lookup with this model
+        # delegate read operations till first write operation such as add() or remove()
+	# NOTE: sharing avoid to copy right the way the whole original model that could be very large :)
+        $new->{Shared} = $class;
+
+        return $new;
 };
 
-# Creates in-memory empty model
+# Creates in-memory empty model with the same options but Sync
 sub create {
-	my $self = ref(shift);
-	return $self->new(); #no Data::MagicTie options passed through for the moment
+        my($class) = shift;
+
+        my $self = ref($class);
+        my $new = $self->new();
+
+	$new->{options}->{Compression}=$class->{options}->{Compression}
+		if(exists $class->{options}->{Compression});
+	$new->{options}->{Freetext}=$class->{options}->{FreeText}
+		if(exists $class->{options}->{FreeText});
+
+        return $new;
 };
 
 sub getNodeFactory {
-	return $_[0]->{nodeFactory};	
+        return $_[0]->{nodeFactory};
 };
 
 sub getLabel {
-	return $_[0]->getURI;
+        return $_[0]->getURI;
 };
 
 sub getDigest {
-	return $_[0];
-};
+        return $_[0];
+};       
 
 sub getURI {
-	if($_[0]->isEmpty()) {
-      		return $_[0]->{nodeFactory}->createUniqueResource()->toString();
-    	} else {
-		return "urn:rdf:".
-				$_[0]->getDigestAlgorithm ."-".
-				RDFStore::Stanford::Digest::Util::toHexString( $_[0]->getDigest() );
-      	};
+        if($_[0]->isEmpty()) {
+                return $_[0]->{nodeFactory}->createUniqueResource()->toString();
+        } else {
+                return "uuid:rdf:".
+                                $_[0]->getDigestAlgorithm ."-".
+                                RDFStore::Stanford::Digest::Util::toHexString( $_[0]->getDigest() );
+        };
 };
 
 sub getDigestAlgorithm {
-	return &RDFStore::Stanford::Digest::Util::getDigestAlgorithm();
-};
+        return &RDFStore::Stanford::Digest::Util::getDigestAlgorithm();
+}; 
 
 sub getDigestBytes {
-	unless ( defined $_[0]->{digest} ) {
-        	sub digest_sorter {
-            		my @a1 = unpack "c*", ${ $a->getDigest()->getDigestBytes() };
-            		my @b1 = unpack "c*", ${ $b->getDigest()->getDigestBytes() };
-            		my $i;
-            		for ($i=0; $i < $#a1 +1; $i++) {
-              			return $a1[$i] - $b1[$i] unless ord $a1[$i] == ord $b1[$i];
-            		};
-            		return 0;
-          	};
-        	my $t;
-        	my $digest_bytes;
-        	for  $t ( sort digest_sorter $_[0]->elements ){
-          		$digest_bytes .= $ { $t->getDigest()->getDigestBytes() };
-        	};
-        	$_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest($_[0]->getDigestAlgorithm,
-					$digest_bytes);
-	};
-	return $_[0]->{digest}->getDigestBytes();
+        unless ( defined $_[0]->{digest} ) {
+                sub digest_sorter {
+                        my @a1 = unpack "c*", ${ $a->getDigest()->getDigestBytes() };
+                        my @b1 = unpack "c*", ${ $b->getDigest()->getDigestBytes() };
+                        my $i;
+                        for ($i=0; $i < $#a1 +1; $i++) {
+                                return $a1[$i] - $b1[$i] unless ord $a1[$i] == ord $b1[$i];
+                        };
+                        return 0;
+                };
+                my $t;
+                my $digest_bytes;
+                for  $t ( sort digest_sorter @{$_[0]->elements} ){ #this still fetches all statements in-memory :(
+                        $digest_bytes .= $ { $t->getDigest()->getDigestBytes() };
+                };
+                $_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest($_[0]->getDigestAlgorithm, $digest_bytes);
+        };
+        return $_[0]->{digest}->getDigestBytes();
 };
 
 #serialise model to strawman syntax - see XML::Parser::OpenHealth(3)
 # it could return a kind of tied filehandle/stream :)
 sub toStrawmanRDF {
+
+	$_[0]->_tie
+                unless($_[0]->_tied);
+
 	# here we should use RDFStore::Stanford::Vocabulary::RDF definitions....
 	my $rdf= '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE rdf:RDF [ <!ENTITY rdf "http://www.w3.org/1999/02/22-rdf-syntax-ns#"> ]><rdf:RDF xmlns:rdf="&rdf;">';
 	$rdf .= "\n";
 
 	# when here we do not have an index set :(
-	foreach( $_[0]->elements ) {
-		$rdf .= '<rdf:Statement rdf:ID="'.$_->getURI().'">'."\n";
+	my($elements)=$_[0]->elements;
+	for my $ii ( 0..$#{$elements} ) {
+		my $st=$elements->[$ii]; #FETCH one by one
 
-		$rdf .= "\t".'<rdf:subject rdf:resource="'.$_->subject()->toString.'" />'."\n";
-		$rdf .= "\t".'<rdf:predicate rdf:resource="'.$_->predicate()->toString.'" />'."\n";
-		my $object = $_->object();
+		$rdf .= '<rdf:Statement rdf:ID="'.$st->getURI().'">'."\n";
+
+		$rdf .= "\t".'<rdf:subject rdf:resource="'.$st->subject()->toString.'" />'."\n";
+		$rdf .= "\t".'<rdf:predicate rdf:resource="'.$st->predicate()->toString.'" />'."\n";
+		my $object = $st->object();
 		# binary data is a still a problem. We might use MIME::Base64 or URI::data
 		if( (defined $object) && (ref($object)) && ($object->isa("RDFStore::Stanford::Literal")) ) {
-			my $s = $_->object()->toString;
+			my $s = $st->object()->toString;
 			$rdf .= "\t".'<rdf:object'.
 					( ($s =~ /[\&\<\>]/) ? ' xml:space="preserve"><![CDATA['.$s.']]>' : '>'.$s ).'</rdf:object>'."\n";
 		} else {
-			$rdf .= "\t".'<rdf:object rdf:resource="'.$_->object()->toString.'" />'."\n";
+			$rdf .= "\t".'<rdf:object rdf:resource="'.$st->object()->toString.'" />'."\n";
 		};
 
 		$rdf .= '</rdf:Statement>'."\n";
@@ -542,90 +1051,381 @@ sub toStrawmanRDF {
 };
 
 
-#Storage related part
+# Storage related part
+
+# copy shared statements across
+sub _copyOnWrite {
+	my($class) = @_;
+ 
+	return
+        	unless( (exists $class->{Shared}) &&
+                	(defined $class->{Shared}) );
+ 
+	my($shares)=$class->{Shared}->elements(	(	(exists $class->{query_model_statement_ids}) &&
+							($#{$class->{query_model_statement_ids}}>=0) ) ? 
+								@{$class->{query_model_statement_ids}} : () );
+
+	#forget about being a query model if necessary :)
+	delete($class->{query_model_statement_ids})
+		if(exists $class->{query_model_statement_ids});
+
+	#break the sharing
+        delete($class->{Shared});
+
+        #XXXX it could be really expensive in-memory consumage and CPU time!!!
+	for my $ii (0..$#{$shares}) {
+		$class->add($shares->[$ii]);
+	};
+};
+                                
+
+# The following two functions come from an algorithm developed by Dirk Willem van Guilk and Nick Hibma called Windex
+#
+# NOTE: I am aware of that the following should be written in C :)
+#
+# Simple RLE encoder/decoder
+# token byte
+#      bit     value   meaning
+#      0..4    ...     lenght of run (len)
+#      5-6     00      len is between 0 .. 31, no other bytes
+#              10      len is continued in next byte, next is LSB (short int)
+#              01      len is continued in next 3 bytes (long int)
+#                         * first is upper nibble of MSB
+#                         * next is lower nibble of MSB
+#                         * next+1 is upper nibble of LSB
+#                         * next+2 is lower nibble of LSB
+#              11      len is continued in next 7 bytes (64 bit int, not implemented yet...)
+#      7       set     run of len bytes set to 0
+#              unset   No run, next len bytes are to be copied
+#                      as-is.
+#
+
+# read a string and returns a RLE encoded version of it
+sub _encode {
+        my ($class,$buff) = @_;
+ 
+	return
+		unless(	(defined $buff) &&
+			($buff ne '') );
+ 
+        my ($out, $comp, $len, $l);
+        $out='';
+        $comp=0;
+        my $insize=length($buff);
+        my $i=0;
+        my $j=0;
+        for($i=0,$j=0; $i<$insize; ) {
+		#found that using regex below is much faster. But if C code the for is probably better...
+                if(     (vec($buff,$i,8)==0) &&
+                        ($i+1<$insize) &&
+                        (0==vec($buff,$i+1,8)) ) {
+                        for(    $len=2;
+                                        ($len+$i<$insize) &&
+                                        (0==vec($buff,$i+$len,8)) &&
+                                        ($len < 536870912); #up to 32*256*256*256
+                                $len++) {};
+                        $comp=1;
+                } else {
+                        for(    $len=1;
+                                        ($len+$i<$insize) &&
+                                        (       (vec($buff,$i+$len,8)) ||
+                                                (vec($buff,$i+$len-1,8)) ) &&
+                                        ($len < 536870912);
+                                $len++) {};
+                        $len--
+                                if(     ($len+$i<$insize) &&
+                                        ($len < 536870912) );
+                        $comp=0;
+                };
+                $l=$j;
+                if($len>8191) {
+                        vec($out,$l,8) = 64 + (($len>>24) & 31);
+                        vec($out,$l+1,8) = ($len>>16) & 0xffff;
+                        vec($out,$l+2,8) = ($len>>8) & 0xffff;
+                        vec($out,$l+3,8) = $len & 0xffff;
+                        $j+=3;
+                } elsif($len>31) {
+                        vec($out,$l,8) = 32 + (($len>>8) & 31);
+                        vec($out,$l+1,8) = $len & 0xff;
+                        $j++;
+                } else {
+                        vec($out,$l,8) = $len & 31;
+                };
+                $j++;
+		if($comp) {
+                        vec($out,$l,8) |= 128;
+                } else {
+                        if($len==1) {
+                                vec($out,$j,8) = vec($buff,$i,8);
+                        } else {
+                                for(my $ii=0;$ii<$len; $ii++) {
+                                        vec($out,$j+$ii,8) = vec($buff,$i+$ii,8);
+                                };
+                        };
+                        $j+=$len;
+                }; # non-compressed else
+                $i+=$len; # hop on for the next ones...
+        };
+        #return $out up to $j
+ 
+        return $out;
+};
+
+# read a RLE encoded string and returns a decompressed version of it
+sub _decode {
+        my ($class,$buff) = @_;
+
+	return
+		unless(	(defined $buff) &&
+			($buff ne '') );
+
+        my ($out, $c, $len);
+        $out='';
+ 
+        my $insize=length($buff);
+        my $i=0;
+        my $j=0;
+        for($i=0,$j=0; $i<$insize; ) {
+                # work out run length
+                $c = vec($buff,$i,8);
+                last
+                        unless($c); #no compress, no length
+
+                if( $c & 64 ) {
+                	$len = $c & 63;
+			for (1..3) {
+                		$len=($len<<8) + vec($buff,++$i,8);
+			};
+		} else {
+                	$len = $c & 31;
+                	$len=($len<<8) + vec($buff,++$i,8)
+                		if( $c & 32 );
+		};
+
+                if($len==0) {
+                        warn "RDFStore::Model::_decode: Bug RLE len=0\n";
+                        last;
+		};
+                $i++;
+                if($c & 128) {
+                        vec($out,$j,8) = (0) x $len;
+                } else {
+                        for(my $ii=0;$ii<$len; $ii++) {
+                                vec($out,$j+$ii,8) = vec($buff,$i+$ii,8);
+                        };
+                        $i+=$len;
+                };
+                $j+=$len;
+        };
+        #return $out up to $j
+ 
+        return $out;
+};
 
 sub _getLookupValue {
-	my ($class) = shift;
+        my ($class) = shift;
 
-	return join('/', @_);
+        return
+                unless(defined $_[0]);
+
+        return pack("i*",$_[0]);
 };
 
-sub _getValuesFromLookup {
-	my ($class) = shift;
+sub _getValueFromLookup {
+        my ($class) = shift;
 
-	return split('/',$_[0]);
+        return
+                unless(defined $_[0]);
+
+        return unpack("i*",$_[0]);
 };
 
-# return a list of RDFNode objects for a given (sp), (po) or (so) couple
-sub fetchRDFNode {
-	my ($class,$s,$p,$o) = @_;
+# return a list of statement IDs for a given criteria. The statement could be *unique*
+sub _fetchRDFNode {
+        my($class,	$subject_localname,
+			$subject_namespace,
+			$predicate_localname,
+			$predicate_namespace,
+			$object_localname,
+			$object_namespace,
+			$object_literal,
+			$object_literal_word) = @_;
 
-	if(	(defined $s) &&
-		($s->isa("RDFStore::Stanford::Resource")) &&
-		(defined $p) &&
-		($p->isa("RDFStore::Stanford::Resource")) ) {
-		my $code = $class->_getLookupValue(scalar($s->hashCode()),scalar($p->hashCode()));
-		# Literals are one fetch away :)
-		return map {
-			if(	(defined $_) &&
-				(	(ref($_)) ||
-					( (s/^\"//) && (s/\"$//) ) ) ) {
-				$_ = $class->{nodeFactory}->createLiteral($_);
-			} elsif(	(defined $_) &&
-					(int($_)) ) {
-				$_ = $class->{resources}->{ $_ }; #FETCH
-				$_ = $class->{nodeFactory}->createResource($_)
-					if(defined $_);
-			} else {
-				return;
-			};
-		} $class->{sp2o_db}->get_dup( $code );
-	} elsif(	(defined $p) &&
-			($p->isa("RDFStore::Stanford::Resource")) &&
-			(defined $o) &&
-			($o->isa("RDFStore::Stanford::RDFNode")) ) {
-		my $code = $class->_getLookupValue(scalar($p->hashCode()),scalar($o->hashCode()));
-		return map {
-			if(	(defined $_) &&
-				(int($_)) ) {
-				$_ = $class->{resources}->{ $_ }; #FETCH
-				$_ = $class->{nodeFactory}->createResource($_)
-					if(defined $_);
-			} else {
-				return;
-			};
-		} $class->{po2s_db}->get_dup( $code );
-	} elsif(	(defined $s) &&
-			($s->isa("RDFStore::Stanford::Resource")) &&
-			(defined $o) &&
-			($o->isa("RDFStore::Stanford::RDFNode")) ) {
-		my $code = $class->_getLookupValue(scalar($s->hashCode()),scalar($o->hashCode()));
-		return map {
-			if(	(defined $_) &&
-				(int($_)) ) {
-				$_ = $class->{resources}->{ $_ }; #FETCH
-				$_ = $class->{nodeFactory}->createResource($_)
-					if(defined $_);
-			} else {
-				return;
-			};
-		} $class->{so2p_db}->get_dup( $code );
+	return
+		if(	(     (exists $class->{options}->{FreeText}) &&
+                              ($class->{options}->{FreeText}==1) ) &&
+			(defined $object_literal) &&
+			(defined $object_literal_word) );
+
+	$object_literal=$object_literal_word
+		if(defined $object_literal_word);
+
+#print STDERR "_fetchRDFNode - ",((caller)[2]),"\n";
+
+        my $Windex='';
+	my $bitno=0;
+	my $mask='';
+	foreach my $idx ( 	$subject_localname, 	#0
+				$subject_namespace,	#1
+				$predicate_localname,	#2
+				$predicate_namespace,	#3
+				$object_localname,	#4
+				$object_namespace,	#5
+				$object_literal ) {	#6
+		if(defined $idx) {
+			$Windex|=(	(exists $class->{options}->{Compression}) &&
+					($class->{options}->{Compression}==1) ) ?
+					$class->_decode( $class->{Windex}->{$idx} ) :
+					$class->{Windex}->{$idx} #FETCH
+				if(exists $class->{Windex}->{$idx}); #EXISTS
+			vec($mask,$bitno,1)|=1;
+
+#print STDERR "A- $bitno(".(
+#		( $subject 	? $subject->toString 	: '').",".
+#		( $predicate 	? $predicate->toString 	: '').",".
+#		( $object 	? $object->toString 	: '') ).")--".length($Windex)."-->'",unpack("b*",$Windex),"'-mask='",unpack("b*",$mask),"'(".length($mask).")\n\n";
+		};
+		$bitno++;
 	};
+
+	my $pos=-1;
+	my @ids;
+	while( ($pos=index($Windex,$mask,$pos)) > -1 ) {
+		push @ids,$pos;
+#print STDERR "_fetchRDFNode() ",(
+#		( $subject      ? $subject->toString    : '').",".
+#		( $predicate    ? $predicate->toString  : '').",".
+#		( $object       ? $object->toString     : '') )," - found at '$pos'\n";
+		$pos++;
+	};
+
+        return @ids;
 };
 
 sub DESTROY {
-	my ($class) = shift;
+        $_[0]->_untie
+                if($_[0]->_tied);
+};
 
-	undef $class->{resources_db};
-	untie %{$class->{resources}};
-	undef $class->{sp2o_db};
-	untie %{$class->{sp2o}};
-	undef $class->{po2s_db};
-	untie %{$class->{po2s}};
-	undef $class->{so2p_db};
-	untie %{$class->{so2p}};
-	undef $class->{result_db};
-	untie %{$class->{result}};
+package RDFStore::Model::Statements;
+
+use vars qw ( $VERSION );
+use strict;
+
+$VERSION = '0.1';
+
+BEGIN {
+        $Data::MagicTie::Array::perl_version_ok=
+		($] ge '5.6.0') ? 1 : 0;
+};
+
+sub new {
+        return $_[0]->TIEARRAY(@_);
+};
+
+sub TIEARRAY {
+        my ($pkg,$model,@ids) = @_;
+
+	return
+                unless(defined $model);
+
+        return 	bless {
+			model => 	$model,
+			ids => \@ids,
+			remove_holes	=>	0
+	},$pkg;
+};
+
+sub FETCH {
+	my($class,$key) = @_;
+
+	if($#{$class->{ids}}>=0) {
+		$key=$class->{ids}->[$key];
+		$key*=8;
+	} else {
+		$key+=$class->{remove_holes};
+		$key*=8;
+
+		while(!(exists $class->{model}->{statements}->{
+			$class->{model}->_getLookupValue($key)})) {	#EXISTS
+			$class->{remove_holes}++;
+			$key+=8;
+		};
+	};
+
+#print STDERR caller,"FETCH($key)\n";
+
+	# here are all the DB operations needed to fetch a statement
+	# NOTE: if we return directly properties in a tied hash should be faster....
+	#
+	# 4+(1|2) EXISTS & FETCH
+	my @nodeids;
+	for my $ff (0,1,2,3,6,4,5) { #see model add() method
+		next
+			if(	(($ff==4) || ($ff==5)) &&
+				(defined $nodeids[6]) ); #save 2 EXISTS/FETCH :)
+			
+		if(	($ff==0) || #skip the EXISTS above :)
+			(exists $class->{model}->{statements}->{
+				$class->{model}->_getLookupValue($key+$ff)}) ) {	#EXISTS
+			$nodeids[$ff]= $class->{model}->{statements}->{
+					$class->{model}->_getLookupValue($key+$ff)}; #FETCH
+			$nodeids[$ff]= $class->{model}->{resources}->{$nodeids[$ff]} #FETCH	
+				if(	(	($ff==0) || 
+						($ff==2) || 
+						($ff==4) ) &&
+					(exists $class->{model}->{resources}->{$nodeids[$ff]}) ); #EXISTS
+			$nodeids[$ff]= $class->{model}->{namespaces}->{$nodeids[$ff]} #FETCH	
+				if(	(	($ff==1) || 
+						($ff==3) || 
+						($ff==5) ) &&
+					(exists $class->{model}->{namespaces}->{$nodeids[$ff]}) ); #EXISTS
+			$nodeids[$ff]= $class->{model}->{literals}->{$nodeids[$ff]} #FETCH	
+				if(	($ff==6) &&
+					(exists $class->{model}->{literals}->{$nodeids[$ff]}) ); #EXISTS
+		};
+	};
+
+	return
+		unless($#nodeids>=2); #minimal statement is (genid1,genid2,"object")
+
+	my $factory=$class->{model}->getNodeFactory;
+	my $subject=$factory->createResource(
+			$nodeids[1] ? 
+				($nodeids[1],$nodeids[0]) : 
+				($nodeids[0]) );
+	my $predicate=$factory->createResource(
+			$nodeids[3] ? 
+				($nodeids[3],$nodeids[2]) : 
+				($nodeids[2]) );
+
+        my $object;
+        if(defined $nodeids[6]) {
+        	$object = $factory->createLiteral($nodeids[6]);
+        } else {
+		$object=$factory->createResource(
+				$nodeids[5] ? 
+					($nodeids[5],$nodeids[4]) : 
+					($nodeids[4]) );
+        };
+
+	return $factory->createStatement($subject,$predicate,$object);
+};
+
+sub FETCHSIZE {
+
+#print STDERR (caller), "-FETCHSIZE: ",(($#{$_[0]->{ids}}>=0) ? $#{$_[0]->{ids}} : $_[0]->{model}->size-1),"\n";
+
+	return ($#{$_[0]->{ids}}>=0) ? $#{$_[0]->{ids}}+1 : $_[0]->{model}->size;
+};
+
+sub STORESIZE {
+};
+
+sub STORE {
+};
+
+sub DESTROY {
 };
 
 1;
@@ -635,15 +1435,11 @@ __END__
 
 =head1 NAME
 
-RDFStore::Model - An implementation of the Model RDF API
+RDFStore::Model - An implementation of the Model RDF API using tied hashes and implementing free-text search on literals
 
 =head1 SYNOPSIS
 
-	use RDFStore::Model;
-	use RDFStore::FindIndex;
 	use RDFStore::NodeFactory;
-	use Data::MagicTie;
-
 	my $factory= new RDFStore::NodeFactory();
 	my $statement = $factory->createStatement(
                         	$factory->createResource('http://perl.org'),
@@ -662,7 +1458,8 @@ RDFStore::Model - An implementation of the Model RDF API
 				$factory->createLiteral("")
 				);
 
-	my $model = new RDFStore::Model( Name => 'store', Split => 20 );
+	use RDFStore::Model;
+	my $model = new RDFStore::Model( Name => 'store', Split => 20, Compression => 1, FreeText => 1 );
 
 	$model->add($statement);
 	$model->add($statement1);
@@ -673,11 +1470,25 @@ RDFStore::Model - An implementation of the Model RDF API
 	print $model1->getDigest->hashCode;
 
 	my $found = $model->find($statement2->subject,undef,undef);
+	my $found1 = $model->find(undef,undef,undef,undef,'Cool'); #free-text search on literals :)
 
 	#get Statements
-	foreach ( $found->elements ) {
+	foreach ( @{$found->elements} ) {
         	print $_->getLabel(),"\n";
 	};
+
+	#or faster
+	my $fetch;
+	foreach ( @{$found->elements} ) {
+		my $fetch=$_;  #avoid too many fetches from RDFStore::Model::Statements
+        	print $fetch->getLabel(),"\n";
+	};
+
+	#or
+	my($statements)=$found1->elements;
+	for ( 0..$#{$statements} ) {
+                print $statements->[$_]->getLabel(),"\n";
+        };
 
 	#get RDFNodes
 	foreach ( keys %{$found->elements}) {
@@ -688,7 +1499,7 @@ RDFStore::Model - An implementation of the Model RDF API
 
 An RDFStore::Stanford::Model implementation using Data::MagicTie tied arrays and hashes to store triplets. The actual store could be tied either to an in-memory, a local or remote database - see Data::MagicTie(3).
 
-This modules implements a storage and iterator by leveraging on perltie(3) and the Data::MagicTie(3) interface.
+This modules implements a storage and iterator by leveraging on perltie(3) and the Data::MagicTie(3) interface. A compact indexing model is used that allows to make free-text indexing up to literals.
 
 =head1 CONSTRUCTORS
  
@@ -698,9 +1509,9 @@ The following methods construct/tie RDFStore::Model storages and objects:
  
 Create an new RDFStore::Model object and tie up a serie of Data::MagicTie hash databases to read/write/query RDFStore::RDFNode. The %whateveryoulikeit hash contains a set of configuration options about how and where store actual data. Most of the options correspond to the Data::MagicTie ones - see Data::MagicTie(3)
 Possible additional options are the following:
- 
+
 =over 4
- 
+
 =item Name
  
 This is a label used to identify a B<Persistent> storage by name. It might correspond to a physical file system directory containing the indexes DBs. By default if no B<Name> option is given the storage is assumed to be B<in-memory> (e.g. RDFStore::Storage::find method return result sets as in-memory models by default unless specified differently). For local persistent storages a directory named liek this option is created in the current working directory with mode 0666)
@@ -709,9 +1520,14 @@ This is a label used to identify a B<Persistent> storage by name. It might corre
 
 Sync the RDFStore::Model with the underling Data::MagciTie GDS after each add() or remove().
 
-=item Resources, Index1, Index2 and Index3
+=item Compression
 
-These parameters point to the Data::MagicTie options of the underlying database.
+Switch on Run Length Encoding (RLE) on the internal index; this option allows to save a lot of space (or memory) if you are going to manage large models. For tiny models is
+faster to use I<no> compression.
+
+=item FreeText
+
+Enable free text searching on literals over a model (see B<find>)
 
 =head1 SEE ALSO
 

@@ -82,7 +82,7 @@ while (my $opt = shift @ARGV) {
 };
 
 if(scalar(@schemas) == 0) {
-	print STDERR "Usage: Generator  [-d <output directory>] [-o <output class name>] [-n <namespace>] [-f <node factory class name>] {-s <schema file or URL>}+\n"."If -d is not specified, generated class will be printed to standard output.\n";
+	print STDERR "Usage: Generator {-s <schema file or URL>}+ -o <output class name> -n <namespace> [-f <node factory class name>] [-d <output directory>]\n"." If -d is not specified, generated class will be printed to standard output.\n";
 	exit(1);
 };
 

@@ -134,8 +134,10 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
     	NAME      => 'RDFStore',
-    	AUTHOR    => 'Alberto Reggiori <areggiori@webweaving.org>',
-    	ABSTRACT  => 'RDF Storage Perl library',
-    	VERSION   => '0.2',
-    	'clean'     => { FILES => "*.db" }
+	VERSION_FROM => 'lib/RDFStore.pm',
+    	'clean'     => { FILES => "*.db" },
+	($] ge '5.005') ? (
+                               'AUTHOR' => 'Alberto Reggiori <areggiori@webweaving.org>',
+                               'ABSTRACT' => 'RDF Storage Perl library',
+                           ) : ()
 );

@@ -1,6 +1,6 @@
 use strict ;
  
-BEGIN { print "1..87\n"; };
+BEGIN { print "1..95\n"; };
 END {print "not ok 1\n" unless $::loaded;};
  
 sub ok
@@ -123,19 +123,24 @@ ok 68, my $statement2 = $factory->createStatement(
 ok 69, my $statement3 = $factory->createStatement(
 		$factory->createResource('http://www.google.com'),
 		$factory->createResource('http://pen.jrc.it/schema/1.0/#creator'),
-		$factory->createLiteral('you') );
+		$factory->createLiteral('you and me') );
 
 ok 70, my $statement4 = $factory->createStatement(
 		$factory->createResource('google'),
 		$factory->createResource('http://pen.jrc.it/schema/1.0/#creator'),
-		$factory->createLiteral('you') );
+		$factory->createLiteral('meMyselfI') );
 
 ok 71, my $statement5 = $factory->createStatement(
 		$factory->createUniqueResource(),
 		$factory->createOrdinal(1),
 		$factory->createLiteral('') );
 
-ok 72, my $model = new RDFStore::Model(Name => 'test', Style => "BerkeleyDB", Split => 3, Sync => 1);
+ok 72, my $model = new RDFStore::SetModel(	Name => 'test', 
+						Style => "BerkeleyDB", 
+						Split => 3, 
+						Sync => 1, 
+						Compression => 1, 
+						FreeText => 1);
 $model->setSourceURI('http://somewhere.org/');
 ok 73, ($model->getSourceURI eq 'http://somewhere.org/');
 ok 74, ($model->toString eq 'Model[http://somewhere.org/]');
@@ -156,32 +161,48 @@ ok 81, ($model->isMutable);
 
 ok 82, my $found = $model->find($statement->subject,undef,$statement->object);
 eval {
-	my @num = $found->elements;
-	die unless($#num==0);
-	die unless($num[0]->equals($statement));
+	my($num) = $found->elements;
+	die unless($#{$num}==0);
+	die unless($num->[0]->equals($statement));
 };
 ok 83, !$@;
 eval {
 	my $st;
 	die unless($st=$found->elements);
+	die unless($st->equals($statement));
 };
 ok 84, !$@;
 
-ok 85, my $model1 = $model->duplicate();
+ok 85, my $statement6 = $factory->createStatement(
+                $factory->createUniqueResource(),
+                $factory->createOrdinal(3),
+                $factory->createLiteral('test6') );
 
-ok 86, $found = $model1->find($statement->subject,undef,$statement->object);
+$found->add($statement6);
+ok 86, ($found->contains($statement6));
+ok 87, ($found->size == 2);
+$found->remove($statement6);
+ok 88, ($found->size == 1);
+ok 89, !($found->contains($statement6));
+
+ok 90, my $model1 = $model->duplicate();
+ok 91, ($model1->size==$model->size);
+
+ok 92, $found = $model1->find($statement2->subject,undef,$statement2->object);
 eval {
-	my @num = $found->elements;
-	die unless($#num==0);
+	my($num) = $found->elements;
+	die unless($#{$num}==0);
 };
-ok 87, !$@;
+ok 93, !$@;
 
-#ok 88, my $model2 = new RDFStore::Model( Parent => $model );
-#ok 89, $found = $model2->find($statement->subject,undef,$statement->object);
-#eval {
-#	my @num = $found->elements;
-#	die unless($#num==0);
-#};
-#ok 90, !$@;
+#free-text on literals
+ok 94, $found=$model->find(undef,undef,undef,'me');
+eval {
+	my($num) = $found->elements;
+	die unless($#{$num}==1);
+};
+ok 95, !$@;
 
+eval{
 rmtree('test');
+};

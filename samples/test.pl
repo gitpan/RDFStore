@@ -1,5 +1,11 @@
 #!/usr/local/bin/perl -I ../lib
 use RDFStore;
+use File::Path qw(rmtree);
+
+unless($#ARGV>=2) {
+	print STDERR "\nUsage: <subject> <predicate> (<object> | 'object')\n\n";
+	exit;
+};
 
 my $factory= new RDFStore::NodeFactory();
 my $statement = $factory->createStatement(
@@ -24,10 +30,10 @@ $model->add($statement1);
 $model->add($statement2);
 
 my $found = $model->find($statement->subject,undef,$statement->object);
-foreach( $found->elements ) {
-#foreach(keys %{$found->elements}){
-	print $_->getLabel(),"\n";
-	#print $_."=".$found->elements->{$_}->getLabel(),"\n";
+my($found_elements) = $found->elements;
+for my $ii ( 0..$#{$found_elements} ) {
+	my $st=$found_elements->[$ii];
+	print $st->getLabel(),"\n";
 };
 
 my $model1 = $model->duplicate();
@@ -37,8 +43,11 @@ my $model1 = $model->duplicate();
 print "The following should give the same results due that is a duplicate model :-)\n";
 
 $found = $model1->find($statement->subject,undef,$statement->object);
-foreach( $found->elements ) {
-#foreach(keys %{$found->elements}){
-	print $_->getLabel(),"\n";
-	#print $_."=".$found->elements->{$_}->getLabel(),"\n";
+($found_elements) = $found->elements;
+for my $ii ( 0..$#{$found_elements} ) {
+	my $st=$found_elements->[$ii];
+	print $st->getLabel(),"\n";
+};
+eval{
+rmtree('test');
 };

@@ -22,7 +22,7 @@
 
 package RDFStore;
 
-$VERSION='0.40';
+$VERSION='0.42';
 
 use RDFStore::Parser::SiRPAC;
 use RDFStore::Parser::OpenHealth;

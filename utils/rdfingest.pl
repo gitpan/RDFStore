@@ -61,7 +61,7 @@ use Data::MagicTie;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] -stuff <URL_or_filename> [-output_dir <valid_directoryname>] -storename <IDENTIFIER> [-style <BerkeleyDB|DB_File|DBMS>] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise] [-v]
+    $0 [-h] -stuff <URL_or_filename> [-output_dir <valid_directoryname>] -storename <IDENTIFIER> [-style <BerkeleyDB|DB_File|DBMS>] [-compression] [-freetext] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise] [-v]
 
 Query an existing RDFStore database.
 
@@ -79,6 +79,12 @@ Query an existing RDFStore database.
 
 [-style <BerkeleyDB|DB_File|DBMS>]
 		BerkeleyDB, DB_File or DBMS store. Default is DB_File.
+
+[-compression]
+		Use RLE encoding in the generated RDFStore model
+
+[-freetext]
+                Generates free-text searchable database
 
 [-split <number>]
 		Number of DB files to split around - see Data::MagicTie(3)
@@ -99,7 +105,7 @@ print $Usage and exit if ($#ARGV<0);
 
 my $factory = new RDFStore::NodeFactory();
 
-my ($verbose,$serialise,$stuff,$storename,$style,$split,$output_dir,$dbms_host,$dbms_port);
+my ($verbose,$compression,$freetext,$serialise,$stuff,$storename,$style,$split,$output_dir,$dbms_host,$dbms_port);
 my @query;
 while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
     my $opt = shift;
@@ -115,6 +121,10 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
 	$style=shift;
     } elsif ($opt eq '-stuff') {
         $stuff = shift;
+    } elsif ($opt eq '-compression') {
+        $compression = 1;
+    } elsif ($opt eq '-freetext') {
+        $freetext = 1;
     } elsif ($opt eq '-serialise') {
         $serialise = 1;
     } elsif ($opt eq '-h') {
@@ -151,6 +161,8 @@ my $model = new RDFStore::SetModel(
 					Host =>    $dbms_host,
                                         Port =>    $dbms_port,
                                         Split       =>      $split,
+					Compression	=>	$compression,
+					FreeText	=>	$freetext,
 					Sync	=> 1 )
 	or croak "Oh dear, can not build my model :( $!";
 $factory = new RDFStore::NodeFactory();
@@ -165,7 +177,7 @@ my $stats=0;
 # input must look like ("S","P","O") or ("S","P",literal("O"))
 while(<STUFF>) {
         if(     (m/\("([^,]*)", "([^,]+)", "(.*)"\)$/) ||
-                (m/\("([^,]*)", "([^,]+)", literal\("(.*)"\)\)$/) ) {
+                (m/\("([^,]*)", "([^,]+)", (literal\(".*"\))\)$/) ) {
                 my $s = trim($1);
                 my $p = trim($2);
                 my $o = trim($3);
@@ -173,14 +185,14 @@ while(<STUFF>) {
                 $p =~ s/^(stdin|file:[^#]+)#?(\w+:)/$2/;
                 $s = $factory->createResource($s);
                 $p = $factory->createResource($p);
-                if($o =~ m/\s*"([^"]+)"\s*/) {
+                if($o =~ m/literal\(\s*"([^"]+)"\s*\)/) {
                         $o = $factory->createLiteral($1);
                 } else {
                         $o =~ s/^(stdin|file:[^#]+)#?(\w+:)/$2/;
                         $o = $factory->createResource($o);
                 };
                 my $stat = $factory->createStatement($s,$p,$o);
-                print STDERR $stat->toString,"\n"
+                print STDERR "Ingesting: ",$stat->toString,"\n"
                         if($verbose);
                 $model->add($stat);
                 $stats++;

@@ -22,6 +22,8 @@
 # *		- updated accordingly to rdf-api-2001-01-19
 # *		- Devon Smith <devon@taller.pscl.cwru.edu> changed getDigest to generate digests and hashes 
 # *		  that match Stanford java ones exactly
+# *     version 0.42
+# *		- updated toString() and getDigest()
 # *
 
 package RDFStore::Statement;
@@ -29,7 +31,7 @@ package RDFStore::Statement;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.42';
 
 use Carp;
 use RDFStore::Stanford::Statement;
@@ -86,9 +88,9 @@ sub node2string {
 };
 
 sub toString {
-        return "triple(". 	$_[0]->node2string($_[0]->{subj}).", ".
-				$_[0]->node2string($_[0]->{pred}).", ".
-				$_[0]->node2string($_[0]->{obj}).")";
+        return "triple(". 	$_[0]->node2string($_[0]->subject).", ".
+				$_[0]->node2string($_[0]->predicate).", ".
+				$_[0]->node2string($_[0]->object).")";
 };
 
 sub getNamespace {
@@ -118,12 +120,12 @@ sub hashCode {
 # see http://nestroy.wi-inf.uni-essen.de/rdf/sum_rdf_api/#K31
 sub getDigest {
 	unless( defined $_[0]->{digest} ) {
-		my $s = $_[0]->{subj}->getDigest()->getDigestBytes();
-        	my $p = $_[0]->{pred}->getDigest()->getDigestBytes();
-        	my $o = $_[0]->{obj}->getDigest()->getDigestBytes();
+		my $s = $_[0]->subject->getDigest()->getDigestBytes();
+        	my $p = $_[0]->predicate->getDigest()->getDigestBytes();
+        	my $o = $_[0]->object->getDigest()->getDigestBytes();
 
         	my $b = $$s . $$p;
-        	if($_[0]->{'obj'}->isa("RDFStore::Stanford::Resource")) {
+        	if($_[0]->object->isa("RDFStore::Stanford::Resource")) {
           		$b .= $$o;
         	} else { # rotate by one byte
           		my @torotate = split(//,$$o);
@@ -132,7 +134,6 @@ sub getDigest {
             			$b .= $_;
           		};
         	};
-
         	$_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest(
 			&RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),$b)
 			or croak "Cannot compute Digest for statement ",$_[0]->getLabel;

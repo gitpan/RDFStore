@@ -20,6 +20,8 @@
 # *		- fixed bugs when checking references/pointers (defined and ref() )
 # *     version 0.4
 # *		- updated accordingly to new RDFStore::Model
+# *     version 0.42
+# *		- updated accordingly to new RDFStore::Model
 # *
 
 package RDFStore::SetModel;
@@ -27,7 +29,7 @@ package RDFStore::SetModel;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.42';
 
 use RDFStore::Model;
 use RDFStore::Stanford::SetModel;
@@ -45,12 +47,19 @@ sub intersect {
 		unless( (defined $_[1]) && (ref($_[1])) &&
 			($_[1]->isa('RDFStore::Stanford::Model')) );
 
-	# this operation should atomic (use a "monitor"/lock thingie)
-	my $tmp = $_[0]->duplicate();
+	# this operation should atomic (use a monitor/lock thingie)
+	my($tmp)= $_[0]->duplicate();
+	($tmp)=$tmp->elements;
 
-	foreach( $tmp->elements ) {
-		$_[0]->remove($_)
-			if(!($_[1]->contains($_)));
+	return 
+		unless(	(defined $tmp) &&
+			(ref($tmp)=~/ARRAY/) );
+
+	my $fetch;
+	foreach( @{$tmp} ) {
+		$fetch=$_; #we avoid too many fetches from RDFStore::Model::Statements
+		$_[0]->remove($fetch)
+			if(!($_[1]->contains($fetch)));
 	};
 	return $_[0];
 };
@@ -60,8 +69,16 @@ sub subtract {
 		unless( (defined $_[1]) && (ref($_[1])) &&
 			($_[1]->isa('RDFStore::Stanford::Model')) );
 
-	foreach( $_[1]->elements ) {
-		$_[0]->remove($_);
+	my($m)= $_[1]->elements;
+
+	return 
+		unless(	(defined $m) &&
+			(ref($m)=~/ARRAY/) );
+
+	my $fetch;
+	foreach ( @{$m} ) {
+		$fetch=$_; #we avoid too many fetches from RDFStore::Model::Statements
+		$_[0]->remove($fetch);
 	};
 	return $_[0];
 };
@@ -71,8 +88,16 @@ sub unite {
 		unless( (defined $_[1]) && (ref($_[1])) &&
 			($_[1]->isa('RDFStore::Stanford::Model')) );
 
-	foreach( $_[1]->elements ) {
-		$_[0]->add($_);
+	my($m)= $_[1]->elements;
+
+	return 
+		unless(	(defined $m) &&
+			(ref($m)=~/ARRAY/) );
+
+	my $fetch;
+	foreach( @{$m} ) {
+		$fetch=$_; #we avoid too many fetches from RDFStore::Model::Statements
+		$_[0]->add($fetch);
 	};
 	return $_[0];
 };

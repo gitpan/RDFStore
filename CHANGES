@@ -1,5 +1,49 @@
 Revision history for Perl extension RDFStore.
 
+version 0.42 - Fri Aug 31 17:31:13 CEST 2001
+-------------------------------------------------------------------------------------------
+
+	Updated Makefiel.PL
+
+	utils/
+		- added rdf2n3p.pl to test cases as part of the RDF Core working group (see
+                  http://www.w3.org/2001/sw/RDFCore/ntriples/)
+		- updated rdf.pl
+		- updated rdfquery.pl
+		- updated rdfingest.pl
+		- updated dbcat
+
+	RDFStore::Parser::SiRPAC
+		- updated accordingly to RDF Core Working Group decisions (see 
+		  http://www.w3.org/2000/03/rdf-tracking/#attention-developers)
+			* rdf-ns-prefix-confusion (carp if error)
+			* rdfms-abouteachprefix (removed aboutEachPrefix)
+			* rdfms-empty-property-elements (updated  processDescription() and processPredicate())
+			* rdf-containers-formalmodel (updated processListItem())
+		- added RDFCore_Issues option
+		- fixed bug when calling setSource() internally
+		- updated makeAbsolute()
+		- fixed bug in processListItem() when calling processContainer()
+		- fixed bug in processPredicate() for empty predicate elements having zero attributes
+
+	Data::MagicTie
+		- fixed compilation bug while strict subs when missing DB_File
+
+	t/
+		- updated magictie.t
+		- updated rdfstore.t
+
+	RDFStore::Statement
+		- updated toString() and getDigest()
+
+	RDFStore::Model
+		- complete redesign of the indexing method up to free-text search on literals
+		- added tied array iterator RDFStore::Model::Statements to allow fetching results one by one
+		- modified find() to allow a 4th paramater to make free-text search over literals
+
+	RDFStore::SetModel
+		- updated accordingly to new RDFStore::Model
+
 version 0.41 - Thu Jul 12 17:11:02 CEST 2001
 -------------------------------------------------------------------------------------------
 

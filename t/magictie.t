@@ -44,7 +44,7 @@ ok 2, my $db1 = tie %a,"Data::MagicTie";
 ok 3, my $db2 = tie @a,"Data::MagicTie";
 
 # check for invalid parameters
-ok 4, my $db3 = tie %b,"Data::MagicTie",( Name => '____33**', Split => -1, Mode => 22341, Style => 'blaaaaa');
+ok 4, my $db3 = tie %b,"Data::MagicTie",( Name => 'test3', Split => -1, Mode => 22341, Style => 'blaaaaa');
 ok 5, my $db4 = tie @b,"Data::MagicTie",( Split => -1, Mode => 22341, Style => 'blaaaaa');
 
 #big one
@@ -365,6 +365,8 @@ eval {
 };
 ok 70, !$@;
 
+eval {
 unlink <test*.db>;
 unlink <*.pag>;
 unlink <*.dir>;
+};

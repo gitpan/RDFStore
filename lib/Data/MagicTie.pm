@@ -41,6 +41,8 @@
 # *		- fixed compilation bug while strict subs
 # *		- added a warning in del_dup() if not supported by underlying DB_File library
 # *		- updated _untie() to avoid warnings while untie databases
+# *     version 0.42
+# *		- fixed compilation bug while strict subs when missing DB_File
 # *
 
 package Data::MagicTie;
@@ -97,7 +99,7 @@ package Data::MagicTie;
 	# Number of databases to split around - none as default
 	$Data::MagicTie::Split_default = 1;
 
-	$VERSION = '0.41';
+	$VERSION = '0.42';
 
         # The lock() and unlock() facilities will be ONLY used inside implicit
         # methods (FETCH,STORE, NEXTKEY etc. etc. - see below)
@@ -163,7 +165,6 @@ package Data::MagicTie;
 		my $org_style = $params{Style};
 		if((exists $params{Style}) && (defined $params{Style}) && ($params{Style} eq 'DBMS')) {
 			if($Data::MagicTie::NO_DBMS) {
-				print STDERR "DBMS style not available. Trying DB_File instead......";
 				$params{Style} = 'DB_File';
 			} else {
 				if(ref($params{type}) =~ /ARRAY/) {
@@ -174,7 +175,6 @@ package Data::MagicTie;
 			};
 		} elsif( (exists $params{Style}) && (defined $params{Style}) && ($params{Style} eq 'BerkeleyDB')) {
 			if($Data::MagicTie::NO_BerkeleyDB) {
-				print STDERR "BerkeleyDB style not available. Trying DB_File instead......";
 				$params{Style} = 'DB_File';
 			} else {
 				$style = 'BerkeleyDB';
@@ -182,11 +182,8 @@ package Data::MagicTie;
 		};
 		if( (exists $params{Style}) && (defined $params{Style}) && ($params{Style} eq 'DB_File')) {
 			if($Data::MagicTie::NO_DB_File) {
-				print STDERR "DB_File style not available. Trying SDBM_File instead......";
 				$params{Style} = 'SDBM_File';
 			} else {
-				print STDERR "found DB_File\n"
-					if($org_style =~ m/DBMS|BerkeleyDB/);
 				$style = 'DB_File';
 			};
 		};
@@ -201,8 +198,6 @@ package Data::MagicTie;
 					return;	
 				};
 
-				print STDERR "found SDBM_File\n"
-					if($org_style =~ m/DB_File|DBMS|BerkeleyDB/);
 				$style = 'SDBM_File';
 			};
 		};
@@ -372,9 +367,12 @@ package Data::MagicTie;
 			} elsif(	(exists $class->{db_options}->{Style}) &&
 					($class->{db_options}->{Style} eq 'DB_File') ) {
 				# Enable duplicate records if necessary
+				{
+                                no strict;
 				$DB_File::DB_BTREE->{'flags'} = R_DUP
 					if(     ($class->{'db_stuff'}->{$s} =~ /HASH/) &&
 						($class->{db_options}->{Duplicates})    );
+				};
                 		$class->{db}->{ $s } = tie ( 
 					( 	($class->{'db_stuff'}->{$s} =~ /HASH/) ? 
 						%{ $class->{'db_stuff'}->{$s} } :
@@ -691,9 +689,12 @@ print STDERR "F - ",$class->{'db_options'}->{Name},"(@_)\n"
 					delete($class->{duplicates}->{ $id }->{$_[0]});
 				};
 			} elsif($class->{db_options}->{Style} eq 'DB_File') {
+				{
+                                no strict;
 				$status=$class->{'db'}->{ $id }->seq($orig_key, $values[0], R_NEXT);
 				$status=$class->{'db'}->{ $id }->seq($orig_key, $values[0], R_CURSOR)
 					if $status;
+				};
 			} elsif($class->{db_options}->{Style} eq 'BerkeleyDB') {
 				{
 				no strict;
@@ -948,6 +949,8 @@ print STDERR "find_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 			$class->_lock($id)
                 		if(defined $class->{LOCKMODE});
 
+			{
+                        no strict;
 			my $s; 
 			my $vvv;
 			my $kkk=$key;
@@ -959,6 +962,7 @@ print STDERR "find_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
                                        	$status=0;
 					last;
 				};
+			};
 			};
 
 			$class->_unlock($id)
@@ -1088,7 +1092,7 @@ print STDERR "get_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
 			unless(	(exists $class->{db_options}->{Shared}) &&
 				(defined $class->{db_options}->{Shared}) );
 
-		my $shared = delete($class->{db_options}->{Shared}); #break the sharing
+		my $shared = $class->{db_options}->{Shared};
 
 		$class->_tie();	
 
@@ -1144,6 +1148,9 @@ print STDERR "get_dup - ",$class->{'db_options'}->{Name},"(@_)\n"
                 } else {
 			warn "Nothing copied really....\n";
 		};
+
+		#break the sharing
+		delete($class->{db_options}->{Shared});
 
 		#not sure that shared DB is untied right hereish.....
 	};

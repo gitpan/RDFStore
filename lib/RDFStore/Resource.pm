@@ -62,6 +62,7 @@ sub new {
 		} elsif($ln =~ s/($Name)$//g) {
 			$self->{localName} = $1;
 			$self->{namespace} = $ln;
+#print STDERR "Resource: '",$self->{namespace},"' - '",$self->{localName},"'\n";
 		} else {
 			$self->{namespace} = undef;
 			$self->{localName} = $_[1];
