@@ -1,0 +1,109 @@
+.\" Copyright (c) 1998
+.\"	Dirk-Willem van Gulik / dirkx@webweaving.org
+.\"	Web Weaving Internet Engineering
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\" 3. All advertising materials mentioning features or use of this software
+.\"    must display the following acknowledgement:
+.\"	This product includes software developed by the University of
+.\"	California, Berkeley and its contributors.
+.\" 4. Neither the name of the University nor the names of its contributors
+.\"    may be used to endorse or promote products derived from this software
+.\"    without specific prior written permission.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd August, 1998
+.Dt DBMSD 8
+.Os
+.Sh NAME
+.Nm dbmsd
+.Nd remote
+.Tn DB
+server
+.Sh SYNOPSIS
+.Nm dbmsd
+.Op Fl x
+.Op Fl v
+.Op Fl t
+.Op Fl d
+.Op Fl d Arg dbase directory
+.Op Fl p Arg port number
+.Op Fl U
+.Op Fl u userid or username
+.Sh DESCRIPTION
+.Nm dbmsd
+runs on a server machine to service
+.Tn DB
+requests from client machines. Mainly a perl library
+.Pp
+.Pp
+The following options are available:
+.Bl -tag -width Ds
+.It Fl v
+Just print the version number, and exit.
+.It Fl X
+Run in debug mode, does not fork, does not detatch.
+.It Fl t
+Simple command tracing; to stdout
+.It Fl d Args directory
+Specifies the prefix for the directory to create the *.db files in. When compiled
+with HASHING set; the
+.Nm dbmsd
+will in fact create another level of directories below this.
+.It Fl p Args port
+Specifies the port number.
+.It Fl u userid or username.
+Specifies as which user the dbm(s) will be accesses. For sanity
+and security reasons, the server
+uses
+.Xr setuid 2
+to change to that userid (or username) as soon as the relevant
+ports are opened, the loggin is startend and, for forking servers,
+the dbmsd.pid file is writen. If not specified the default
+.Dq nobdoy
+is used.
+.It Fl U
+Specifies no user ID change; the server will run from the user ID
+is was started from (usually root). This counters the
+.Dq -u
+flag above.
+.El
+.Pp
+For example, 
+.Dq Li "dbmsd -p 1234 -d /tmp"
+Caused the server to listen to port 1234 (the default) and create
+its Berkely DB files in /tmp (the default).
+.Pp
+The
+.Nm dbmsd
+utility exits 0 on success, and >0 if an error occurs.
+.Sh SEE ALSO
+.Xr DB 3 ,
+.Xr Perl 1 
+and
+.Xr perltie 1
+.Sh Author
+Dirk-Willem van Gulik, Alberto Reggiori at STA/ISIS, Joint Research Center Ispra 
+for the ParlEuNet project.
+.Sh HISTORY
+The
+.Nm dbmsd
+Started live with the ParlEuNet project.

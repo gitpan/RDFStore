@@ -1,0 +1,44 @@
+#!/usr/local/bin/perl
+use Data::MagicTie;
+use Data::Dumper;
+use Fcntl;
+
+$Data::Dumper::Indent = 1;
+
+die "Usage: dbcat <filename>  <see_values> <no_serialise> <Q_factor> <local_or_remote> [<host> <port>]\n"
+	unless($#ARGV>=4);
+
+my $file = shift;
+$file =~ s/\.([dbm]+)$//;
+my $seevalues = shift;
+my $noft = shift;
+my $Q = shift;
+undef $Q
+	unless ($Q =~ /\d+/);
+my $lr = shift;
+my $host = shift;
+undef $host
+	unless($host ne '');
+my $port = shift;
+undef $port
+	unless($port =~ /\d+/);
+
+tie %tmp, "Data::MagicTie",$file,( lr => $lr, mode => O_RDONLY, noft => $noft, Q => $Q,dbms_host => $host, dbms_port => $port )
+	or die "Could not open $file: $!";
+
+while(($k,$v)=each %tmp) {
+
+	print $file." "
+		if $more_than_one;
+
+	$k =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+	$v =~ s/[\x00-\x1f]/sprintf("%%%2x",\1)/eg;
+
+	$v= Dumper( $v ) if ref($v);
+
+	print "'$k'";
+	print "=\t$v"
+		if $seevalues;
+	print "\n";
+	};
+untie %tmp;

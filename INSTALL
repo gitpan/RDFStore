@@ -1,0 +1,11 @@
+perl Makefile.PL;
+make;
+make test;
+make install;
+
+To build and install DBMS support:
+cd dbms;
+make;
+make install;
+
+(by default the dbmsd get installed under the /RDFStore branch)

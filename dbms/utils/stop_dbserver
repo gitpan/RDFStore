@@ -1,0 +1,22 @@
+#!/bin/sh
+
+SERVERS=dbmsd
+ 
+echo 'Stoppping DBMS server....'
+echo 'First kills....'
+for i in $SERVERS
+do
+        PID=/var/run/$i.pid
+        if [ -f $PID ]; then
+                kill -15 `cat $PID`
+                fi
+done
+ 
+sleep 1
+echo 'Second kills....'
+for i in $SERVERS
+do
+        killall $i
+done
+
+echo DONE

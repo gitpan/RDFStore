@@ -1,0 +1,40 @@
+#!/usr/local/bin/perl -I/RDFStore/lib
+#
+use DBMS;
+use Fcntl;
+$host='localhost';
+
+$more_than_one = ($#ARGV==0) ? 0 : 1;
+
+while(1) {
+	last unless $ARGV[0]  =~ m/^-/;
+	if ($1 eq '-l') {
+		$more_than_once = 0;
+		}
+	else {
+		@ARGV=(); 
+		last;
+		};
+	};
+
+if ($#ARGV<0) {
+	print STDERR "Syntax: $0 [-l] <file [files]>\n";
+	exit 1;
+	};
+
+
+foreach $file (@ARGV) {
+	$file =~ s/\.([dbm]+)$//;
+	tie %tmp, "DBMS",$file,O_RDONLY ,$host
+		or die "Could not open $file: $! - $DBMS_ERROR";
+
+	while(($k,$v)=each %tmp) {
+
+		print $file." "
+			if $more_than_one;
+
+		print "$k =\t$v\n";
+		};
+	untie %tmp
+	};
+

@@ -1,0 +1,42 @@
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+        xmlns:misc="http://xmlns.com/foaf/0.1/"
+        xmlns:wn="http://xmlns.com/wordnet/1.6/"
+        xmlns:dc="http://purl.org/dc/elements/1.1/" >
+
+<rdf:Property   rdf:about="http://xmlns.com/foaf/0.1/mbox"
+                rdfs:label="Personal Mailbox" 
+                rdfs:comment="A web-identifiable Internet mailbox associated with exactly one owner."
+                />
+ 
+<rdf:Property rdf:about="http://xmlns.com/foaf/0.1/givenname"
+                rdfs:label="Given name"
+                rdfs:comment="The given name of some agent."
+                />
+
+<rdf:Property rdf:about="http://xmlns.com/foaf/0.1/surname"
+                rdfs:label="Surname"
+                rdfs:comment="The surname of some agent."
+                />
+
+<rdf:Property rdf:about="http://xmlns.com/foaf/0.1/title"
+                rdfs:label="Title"
+                rdfs:comment="Title (Mr, Mrs, Ms, Dr. etc)"
+                />
+
+<rdf:Property rdf:about="http://xmlns.com/foaf/0.1/phone"
+                rdfs:label="Phone number"
+                rdfs:comment="A fully qualified international phone number, specified using
+                        the tel: URL scheme (refs: http://www.w3.org/Addressing/schemes.html#tel)"
+                />
+
+
+
+
+<rdf:Property rdf:about="http://xmlns.com/foaf/0.1/xxx"
+                rdfs:label=""
+                rdfs:comment=""
+                />
+
+</rdf:RDF>
+

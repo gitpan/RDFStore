@@ -1,0 +1,213 @@
+Revision history for Perl extension RDFStore.
+
+version 0.31 - Fri Dec 22 15:31:14 CET 2000
+-------------------------------------------------------------------------------------------
+
+	This version has renamed all the Perl packages making RDFStore ready to be published to
+	the Perl CPAN archive. The module names have been mapped as follows:
+
+	 version<=0.3				version>=0.31
+	================================================================================	
+	Data::MagicTie::Client			Data::MagicTie::DBMS
+	Data::MagicTie::DB_File			(unchanged)
+	Data::MagicTie::BerkeleyDB		(unchanged)
+	Data::MagicTie				(unchanged)
+	RDF::Digest::Abstract			RDFStore::Stanford::Digest::Abstract
+	RDF::Digest::Util			RDFStore::Stanford::Digest::Util
+	RDF::Digest::MD5			RDFStore::Stanford::Digest::MD5
+	RDF::Digest::Generic			RDFStore::Stanford::Digest::Generic
+	RDF::Digest::SHA1			RDFStore::Stanford::Digest::SHA1
+	RDF::Vocabulary::RDFS			RDFStore::Vocabulary::RDFS
+	RDF::Vocabulary::Generator		RDFStore::Stanford::Vocabulary::Generator
+	RDF::Vocabulary::DC			RDFStore::Vocabulary::DC
+	RDF::Vocabulary::DAML			RDFStore::Vocabulary::DAML
+	RDF::Vocabulary::RDF			RDFStore::Vocabulary::RDF
+	RDF::Store::SchemaModel			RDFStore::SchemaModel
+	RDF::Store::Model			RDFStore::Model
+	RDF::Store::NodeFactory			RDFStore::NodeFactory
+	RDF::Store::RDFNode			RDFStore::RDFNode
+	RDF::Store::Resource			RDFStore::Resource
+	RDF::Store::Statement			RDFStore::Statement
+	RDF::Store::SetModel			RDFStore::SetModel
+	RDF::Store::VirtualModel		RDFStore::VirtualModel
+	RDF::Store::FindIndex			RDFStore::FindIndex
+	RDF::Store::Literal			RDFStore::Literal
+	RDF::RDFNode				RDFStore::Stanford::RDFNode
+	RDF::Model				RDFStore::Stanford::Model
+	RDF::Statement				RDFStore::Stanford::Statement
+	RDF::NodeFactory			RDFStore::Stanford::NodeFactory
+	RDF::SetModel				RDFStore::Stanford::SetModel
+	RDF::VirtualModel			RDFStore::Stanford::VirtualModel
+	RDF::Literal				RDFStore::Stanford::Literal
+	RDF::Store				RDFStore::Stanford::Store
+	RDF::Digest				RDFStore::Stanford::Digest
+	RDF::Resource				RDFStore::Stanford::Resource
+	XML::Parser::PenRDF::RDFStore		RDFStore::Parser::Styles::MagicTie
+	XML::Parser::PenRDF			RDFStore::Parser::SiRPAC
+	XML::Parser::PenRDFStrawman		RDFStore::Parser::OpenHealth
+
+	The only Perl package namespace "invaded" is the Data one with the Data::MagicTie modules.
+
+	In addition the documentation has been updated and the API modified accordingly to the latest 
+	changes in the Stanford Java API 2000-12-05 distribution. 
+	(see http://www-db.stanford.edu/~melnik/rdf/rdf-api-2000-12-05.zip)
+
+	RDFStore::FindIndex
+		- added new index storage method. Does not use Freezed/Thawed arrays  if possible
+
+	RDFStore::Stanford::Digest::Util
+		- fixed nusty bug in digestBytes2HashCode() to cast hash code to INTEGER
+
+	Data::MagicTie
+		- added get_Options() method
+
+	Data::MagicTie::BerkeleyDB
+		- completely modified the access methods to Sleepycat library and DBs - see Data::MagicTie::DB_File(3)
+
+	RDFStore::Stanford::Store
+		- added use (include) of all RDFStore modules suite
+
+	RDFStore::Model
+		- fixed bug in add() when adding statements with a Literal value
+		- commented out isEmpty() check in find() due to DBMS(3) efficency problems 	
+		- updated toStrawmanRDF() method 
+		- modifed add() to avoid update of existing statements
+
+	RDFStore::Stanford::NodeFactory
+		- fixed the parameters checking when create Statements
+
+	RDFStore::Parser::SiRPAC
+		- fixed bug in parse_start() and parse() to check $file_or_uri
+		  is a reference to an URI object
+		- changed wget() Socket handle to work with previous Perl versions (not my $handle) and
+		  do HTTP GET even on HTTP 'Location' redirect header
+		- fixed bug in RDFXML_CharacterDataHand() when trim text and $preserveWhiteSpace              
+		- fixed bug in processTypedNode() when remove attributes
+		- commented off croak in expandAttributes() when 'expanding predicate element' for
+		  production http://www.w3.org/TR/REC-rdf-syntax/#typedNode for xhtml2rdf stuff
+
+	RDFStore::Parser::SiRPACStrawman
+		- changed wget() Socket handle to work with previous Perl versions (not my $handle) and
+		  do HTTP GET even on HTTP 'Location' redirect header
+		- little change when checking if a prefix is undefined
+
+	utils/
+		- added rdfingest.pl to ingest (S,P,O) comma separated text files right the way
+		- updated rdf.pl rdfquery.pl
+
+version 0.3 - Tue Nov 28 14:02:10 CET 2000
+-------------------------------------------------------------------------------------------
+
+	This version has updated the Perl modules set accordingly to the latest chnages in the Stanford
+        Java API 2000-11-13 distribution. (see http://www-db.stanford.edu/~melnik/rdf/rdf-api-2000-11-13.zip)
+	
+	Almost all modules have been fixed when checking references/pointers (defined and ref() )
+
+	RDF::Store::FindIndex
+		- fixed bugs when checking references/pointers (defined and ref() )
+
+	XML::Parser::PenRDF
+		- fixed bug in expandAttributes() when expand rdf:value
+            	- Modified addOrder() expandAttributes() accordingly to rdf-api-2000-11-13
+		- fixed bug in parse() parse_start() to set the Source right
+		- fixed bug in RDFXML_StartElementHandler() when parseLiteral process attributes also
+		- fixed bug in processTypedNode() to manage new attlist way
+		- fixed bug in processPredicate() to manage new attlist way
+		- fixed bugs due to the modifications due rdf-api-2000-10-30. Now $n->{tag} is either
+		  $n->name() or $n->localName(); code got more clear also
+		- fixed addTriple() and reify() - more checking and modified to manage right $subject
+
+	XML::Parser::PenRDF::RDFStore
+		- fixed bug in Assert() checking if $st is a ref and valid RDF::Statement
+
+	RDF::Vocabulary::RDFS
+		- changed namespace to http://www.w3.org/2000/01/rdf-schema#
+
+	RDF::Store::Model
+		- fixed bug in find(). Check the type of $t before using methods on it
+		- added toStrawmanRDF() to serialise the model in strawman RDF for 
+		  XML::Parser::PenRDFStrawman
+		- fixed bug in create()
+		- modified updateDigest() method accordingly to rdf-api-2000-11-13
+
+	RDF::Vocabulary::Generator
+		- fixed bug in toPerlName() and dumpVocabulary() avoid grep regex checking
+
+	RDF::Store::SchemaModel
+		- added getLocalName() and getNamespace() to delegate to instances
+		- changed checking to RDF::SetModel type
+		- modified toString()
+		- fixed miss-spell in validate()
+
+	Data::MagicTie::Client
+		- fixed bug in FIRSTKEY(). Do not call keys and each anymore.
+
+	utils/
+		- little bit of changes in rdf.pl and rdfquery.pl
+		- rdfquery.pl query syntax changed
+
+version 0.2 - Mon Nov 13 14:56:46 CET 2000
+-------------------------------------------------------------------------------------------
+
+	This version updates the whole Perl modules set accordingly to the latest chnages in the Stanford 
+	Java API 2000-10-30 distribution. (see http://WWW-DB.Stanford.EDU/~melnik/rdf/rdf-api-2000-10-30.zip)
+
+	XML::Parser::PenRDF/XML::Parser::PenRDFStrawman
+		- fixed bug in parsefile() to read URL-less filenames
+		  (version0.1 was working only with 'file:' URL prefix)
+		- fixed a lot of bugs/inconsistences in new(), parse(), setSource(), parsestring()
+		  processXML() in the fetchSchema part, makeAbsolute()
+		- added parse_start a la XML::parser for no-blocking stream
+		  parsing using XML::Parser::ExpatNB
+		- pod documentation updated
+		- does not use URI::file anymore
+		- Modified createResource(), XML::Parser::PenRDF::Element and
+		  XML::Parser::PenRDF::DataElement accordingly to rdf-api-2000-10-30
+		- General bug fixing
+
+	XML::Parser::PenRDF::RDFStore
+		- Init() now setSourceURI() for the model
+		- now the result set is a SetModel
+
+	RDF::Resource, RDF::NodeFactory, RDF::Store::Literal, RDF::Store::NodeFactory,
+	RDF::Store::RDFNode,RDF::Store::Resource,RDF::Store::Statement
+		- Modified accordingly to rdf-api-2000-10-30
+
+	RDF::Store::Model
+		- fixed bug in new() to check if triples is HASH ref when passed by user
+		- fixed bug in find() do avoid to  return instances of SetModel (see SchemaModel.pm also)
+		  Now result sets are put in an object(model) of the the same type - see find()
+		- modified add() remove() clone() duplicate() and added toString() makePrivate()
+		  getNamespace() getLocalName() methods accordingly to rdf-api-2000-10-30
+		- modifed new(), duplicate(), clone() and find() to support cloned models
+		- modified find() to manage normal Models and indexed Models differently
+		- added optional indirect indexing to find() i.e. the FindIndex 
+		  stores just digested keys and not the full BLOB; fetch from an 
+		  index then require an additional look up in triples
+
+	RDF::Vocabulary::Generator
+		- added more magic keywords to 'reservedWords' list (my, local)
+		- Modified createResource() accordingly to rdf-api-2000-10-30
+
+	RDF::NodeFactory
+		- pass @_ array to new methods
+	
+	Data::MagicTie
+		- fixed warning messages
+
+	RDF::Store::SetModel
+		- fixed bug in intersect()
+		- now all methods return the modified model
+
+	RDF::Store::FindIndex
+		- fixed miss-spelling bug in remove()
+		- added indirect indexing support to be de-referenced by the caller 
+		  Model object.
+
+	samples/
+		- fixed bugs in rdf.pl and rdfquery.pl
+		- rdfquery.pl uses SetModel to unite (||), intersect (&&), subtract(!), 
+
+version 0.1 - 2000/11/03 at 04:30 CEST
+-------------------------------------------------------------------------------------------
+	- first public version

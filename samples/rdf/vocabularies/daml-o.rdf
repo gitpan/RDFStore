@@ -1,0 +1,380 @@
+<?xml version="1.0"?>
+
+<!DOCTYPE rdf:RDF [
+ <!ENTITY daml-o "http://www.daml.org/2000/10/daml-ont#">
+ <!ENTITY rdf    "http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+ <!ENTITY rdfs   "http://www.w3.org/2000/01/rdf-schema#">
+]>
+
+<rdf:RDF xmlns:rdf="&rdf;"
+         xmlns:rdfs="&rdfs;"
+         xmlns="&daml-o;">
+
+<rdf:Description rdf:about="&daml-o;">
+  <versionInfo>$Id: daml-ont.daml,v 1.2 2000/10/11 06:30:02 connolly Exp $</versionInfo>
+  <imports rdf:resource="http://www.w3.org/2000/01/rdf-schema"/>
+</rdf:Description>
+
+<!-- Terms for building classes from other classes. -->
+
+<Class rdf:ID="&daml-o;Thing">
+  <label>Thing</label>
+  <comment>The most general class in DAML.</comment>
+</Class>
+
+<Class rdf:ID="&daml-o;Nothing">
+  <comment>the class with no things in it.</comment>
+  <complementOf rdf:resource="&daml-o;Thing"/>
+</Class>
+
+<Property rdf:ID="&daml-o;disjointWith">
+  <label>disjointWith</label>
+  <comment>for disjointWith(X, Y) read: X and Y have no members
+	in common.
+  </comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;Class"/>
+</Property>
+
+<Class rdf:ID="&daml-o;Disjoint">
+  <label>Disjoint</label>
+  <subClassOf rdf:resource="&daml-o;List"/>
+  <comment>for type(L, Disjoint) read: the classes in L are
+  pairwise disjoint.
+
+  i.e. if type(L, Disjoint), and C1 in L and C2 in L, then disjointWith(C1, C2).
+  </comment>
+</Class>
+
+<Property rdf:ID="&daml-o;unionOf">
+  <label>unionOf</label>
+  <comment>
+    for unionOf(X, Y) read: X is the union of the classes in the list Y;
+    i.e. if something is in any of the classes in Y, it's in X, and vice versa.
+    cf OIL OR</comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;List"/>
+</Property>
+
+<Property rdf:ID="&daml-o;disjointUnionOf">
+  <label>disjointUnionOf</label>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;List"/>
+  <comment>
+
+    for disjointUnionOf(X, Y) read: X is the disjoint union of the classes in
+    the list Y: (a) for any c1 and c2 in Y, disjointWith(c1, c2),
+    and (b) i.e. if something is in any of the classes in Y, it's
+    in X, and vice versa.
+
+    cf OIL disjoint-covered
+  </comment>
+</Property>
+
+<Property rdf:ID="&daml-o;intersectionOf">
+  <comment>
+    for intersectionOf(X, Y) read: X is the intersection of the classes in the list Y;
+    i.e. if something is in all the classes in Y, then it's in X, and vice versa.
+cf OIL AND</comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;List"/>
+</Property>
+
+<Property rdf:ID="&daml-o;complementOf">
+  <comment>
+    for complementOf(X, Y) read: X is the complement of Y; if something is in Y,
+    then it's not in X, and vice versa.
+cf OIL NOT</comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;Class"/>
+</Property>
+
+<!-- List terminology. -->
+
+<Class rdf:ID="&daml-o;List">
+  <subClassOf rdf:resource="&rdf;Seq"/>
+</Class>
+
+<Property rdf:ID="&daml-o;oneOf">
+  <comment>for oneOf(C, L) read everything in C is one of the
+     things in L;
+     This lets us define classes by enumerating the members.
+  </comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;List"/>
+</Property>
+
+<Class rdf:ID="&daml-o;Empty">
+  <asClass rdf:resource="&daml-o;Nothing"/>
+</Class>
+
+<Property rdf:ID="&daml-o;first">
+  <domain rdf:resource="&daml-o;List"/>
+</Property>
+
+<Property rdf:ID="&daml-o;rest">
+  <domain rdf:resource="&daml-o;List"/>
+  <range rdf:resource="&daml-o;List"/>
+</Property>
+
+<Property rdf:ID="&daml-o;item">
+  <comment>for item(L, I) read: I is an item in L; either first(L, I)
+    or item(R, I) where rest(L, R).</comment>
+  <domain rdf:resource="&daml-o;List"/>
+</Property>
+
+
+<!-- facets of properties. -->
+
+<Property rdf:ID="&daml-o;cardinality">
+  <label>cardinality</label>
+  <comment>for cardinality(P, N) read: P has cardinality N; i.e.
+    everything x in the domain of P has N things y such that P(x, y).
+  </comment>
+  <domain rdf:resource="&daml-o;Property"/>
+</Property>
+
+<Property rdf:ID="&daml-o;maxCardinality">
+  <label>maxCardinality</label>
+  <comment>for maxCardinality(P, N) read: P has maximum cardinality N; i.e.
+    everything x in the domain of P has at most N things y such that P(x, y).
+  </comment>
+  <domain rdf:resource="&daml-o;Property"/>
+</Property>
+
+<Property rdf:ID="&daml-o;minCardinality">
+  <comment>for minCardinality(P, N) read: P has minimum cardinality N; i.e.
+    everything x in the domain of P has at least N things y such that P(x, y).
+  </comment>
+  <domain rdf:resource="&daml-o;Property"/>
+</Property>
+
+<Property rdf:ID="&daml-o;inverseOf">
+  <comment>for inverseOf(R, S) read: R is the inverse of S; i.e.
+     if R(x, y) then S(y, x) and vice versa.</comment>
+  <domain rdf:resource="&daml-o;Property"/>
+  <range rdf:resource="&daml-o;Property"/>
+</Property>
+
+<Class rdf:ID="&daml-o;TransitiveProperty"/>
+
+<Class rdf:ID="&daml-o;UniqueProperty">
+  <label>UniqueProperty</label>
+  <comment>compare with maxCardinality=1; e.g. integer successor:
+	if P is a UniqueProperty, then
+	if P(x, y) and P(x, z) then y=z.
+	aka functional.
+  </comment>
+  <subClassOf rdf:resource="&daml-o;Property"/>
+</Class>
+
+<Class rdf:ID="&daml-o;UnambiguousProperty">
+  <label xml:lang="en">UnambiguousProperty</label>
+  <comment>if P is an UnambiguousProperty, then
+	if P(x, y) and P(z, y) then x=z.
+	aka injective.
+	e.g. if nameOfMonth(m, "Feb")
+	and nameOfMonth(n, "Feb") then m and n are the same month.
+  </comment>
+  <subClassOf rdf:resource="&daml-o;Property"/>
+</Class>
+
+
+<!-- Terms for restricting properties of things in classes. -->
+
+<Class rdf:ID="&daml-o;Restriction"/>
+
+<Property rdf:ID="&daml-o;restrictedBy">
+  <label>restrictedBy</label>
+  <comment>for restrictedBy(C, R), read: C is restricted by R; i.e. the
+	restriction R applies to c;
+
+        if onProperty(R, P) and toValue(R, V)
+        then for every i in C, we have P(i, V).
+
+        if onProperty(R, P) and toClass(R, C2)
+        then for every i in C and for all j, if P(i, j) then type(j, C2).
+  </comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;Restriction"/>
+</Property>
+
+<Property rdf:ID="&daml-o;onProperty">
+  <comment>for onProperty(R, P), read:
+   R is a restriction/qualification on P.</comment>
+  <domain rdf:resource="&daml-o;Restriction"/>
+  <domain rdf:resource="&daml-o;Qualification"/>
+  <range rdf:resource="&daml-o;Property"/>
+</Property>
+
+<Property rdf:ID="&daml-o;toValue">
+  <comment>for toValue(R, V), read: R is a restriction to V.</comment>
+  <domain rdf:resource="&daml-o;Restriction"/>
+  <range rdf:resource="&daml-o;Class"/>
+</Property>
+
+<Property rdf:ID="&daml-o;toClass">
+  <comment>for toClass(R, C), read: R is a restriction to C.</comment>
+  <domain rdf:resource="&daml-o;Restriction"/>
+  <range rdf:resource="&daml-o;Class"/>
+</Property>
+
+<Class rdf:ID="&daml-o;Qualification"/>
+
+<Property rdf:ID="&daml-o;qualifiedBy">
+  <label>qualifiedBy</label>
+  <comment>for qualifiedBy(C, Q), read: C is qualified by Q; i.e. the
+	qualification Q applies to C;
+
+        if onProperty(Q, P) and hasValue(Q, C2)
+        then for every i in C, there is some V
+	so that type(V, C2) and P(i, V).
+  </comment>
+  <domain rdf:resource="&daml-o;Class"/>
+  <range rdf:resource="&daml-o;Qualification"/>
+</Property>
+
+<Property rdf:ID="&daml-o;hasValue">
+  <label>hasValue</label>
+  <comment>for hasValue(Q, C), read: Q is a hasValue
+   qualification to C.</comment>
+  <domain rdf:resource="&daml-o;Qualification"/>
+  <range rdf:resource="&daml-o;Class"/>
+</Property>
+
+
+<!-- A class for ontologies themselves... -->
+
+<Class rdf:ID="&daml-o;Ontology">
+  <label>Ontology</label>
+  <comment>An Ontology is a document that describes
+	a vocabulary of terms for communication between
+	(human and) automated agents.
+  </comment>
+</Class>
+
+<Property rdf:ID="&daml-o;versionInfo">
+  <label>versionInfo</label>
+  <comment>generally, a string giving information about this
+	version; e.g. RCS/CVS keywords
+  </comment>
+</Property>
+
+<!-- Importing, i.e. assertion by reference -->
+
+<Property rdf:ID="&daml-o;imports">
+  <label>imports</label>
+  <comment>for imports(X, Y) read: X imports Y;
+	i.e. X asserts the* contents of Y by reference;
+	i.e. if imports(X, Y) and you believe X and Y says something,
+	then you should believe it.
+
+	Note: "the contents" is, in the general case,
+	an il-formed definite description. Different
+	interactions with a resource may expose contents
+	that vary with time, data format, preferred language,
+	requestor credentials, etc. So for "the contents",
+	read "any contents".
+  </comment>
+</Property>
+
+<!-- Renaming -->
+
+<Property rdf:ID="&daml-o;equivalentTo"> <!-- equals? equiv? renames? -->
+  <comment>for equivalentTo(X, Y), read X is an equivalent term to Y.
+  </comment>
+
+	<!--@@RDF specs prohibits cycles, but I don't buy it. -->
+  <subPropertyOf rdf:resource="&daml-o;subPropertyOf"/>
+  <subPropertyOf rdf:resource="&daml-o;subClassOf"/>
+</Property>
+
+<!-- Importing terms from RDF/RDFS -->
+
+<!-- first, assert the contents of the RDF schema by reference -->
+<Ontology rdf:about="&daml-o;">
+  <imports rdf:resource="http://www.w3.org/2000/01/rdf-schema"/>
+</Ontology>
+
+
+<Property rdf:ID="&daml-o;subPropertyOf">
+  <equivalentTo  rdf:resource="&rdfs;subPropertyOf"/>
+  <subPropertyOf rdf:resource="&rdfs;subPropertyOf"/>
+  <!-- the subPropertyOf is for the benefit of agents that know RDFS
+       but don't know DAML. -->
+</Property>
+
+<Class rdf:ID="&daml-o;Class">
+  <equivalentTo rdf:resource="&rdfs;Class"/>
+</Class>
+
+<Class rdf:ID="&daml-o;Literal">
+  <equivalentTo rdf:resource="&rdfs;Literal"/>
+</Class>
+
+<Class rdf:ID="&daml-o;Property">
+  <equivalentTo rdf:resource="&rdf;Property"/>
+</Class>
+
+<Property rdf:ID="&daml-o;type">
+  <equivalentTo rdf:resource="&rdf;type"/>
+</Property>
+
+<Property rdf:ID="&daml-o;value">
+  <equivalentTo rdf:resource="&rdf;value"/>
+</Property>
+
+<Property rdf:ID="&daml-o;subClassOf">
+  <equivalentTo rdf:resource="&rdfs;subClassOf"/>
+</Property>
+
+<Property rdf:ID="&daml-o;domain">
+  <equivalentTo rdf:resource="&rdfs;domain"/>
+</Property>
+
+<Property rdf:ID="&daml-o;range">
+  <equivalentTo rdf:resource="&rdfs;range"/>
+</Property>
+
+<Property rdf:ID="&daml-o;label">
+  <equivalentTo rdf:resource="&rdfs;label"/>
+</Property>
+
+<Property rdf:ID="&daml-o;comment">
+  <equivalentTo rdf:resource="&rdfs;comment"/>
+</Property>
+
+<Property rdf:ID="&daml-o;seeAlso">
+  <equivalentTo rdf:resource="&rdfs;seeAlso"/>
+</Property>
+
+<Property rdf:ID="&daml-o;isDefinedBy">
+  <equivalentTo rdf:resource="&rdfs;isDefinedBy"/>
+  <subPropertyOf rdf:resource="&daml-o;seeAlso"/>
+</Property>
+
+<Property rdf:ID="&daml-o;default">
+  <label>default</label>
+  <comment>default(X, Y) suggests that Y be considered a/the default
+	value for the X property. This can be considered
+	documentation (ala label, comment) but we don't specify
+	any logical impact.
+  </comment>
+</Property>
+
+<!-- from RDF, left out:
+	Bag, Alt: why bother? note that we can't import
+		the syntax of these into the DAML namespace if we expect
+		RDF 1.0 parsers to grok.
+	predicate, subject, object, Statement: DAML audience doesn't need quoting.
+-->
+
+<!-- from RDFS, left out
+	Container: the motivation for this, to somehow denote that other
+		element names can be used with the <li> syntax, is busted.
+	ContainerMembershipProperty: without the <li> syntax, not much use for this.
+	ConstraintResource, ConstraintProperty: I don't grok these.
+ -->
+
+
+</rdf:RDF>

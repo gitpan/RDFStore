@@ -1,0 +1,518 @@
+<?xml version="1.0" encoding="utf-8"?>
+<r:RDF xmlns:h="http://www.w3.org/1999/xhtml"
+xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+xmlns:s="http://www.w3.org/TR/1999/PR-rdf-schema-19990303#">
+<!--xmlns:s="http://www.w3.org/2000/01/rdf-schema#">-->
+  <s:Class about="http://www.w3.org/2000/07/hs78/algernon#things">
+    <s:label>things</s:label>
+  </s:Class>
+
+  <s:Class about="http://www.w3.org/2000/07/hs78/algernon#rules">
+    <s:label>rules</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#things" />
+  </s:Class>
+
+  <s:Class about="http://www.w3.org/2000/07/hs78/algernon#objects">
+    <s:label>objects</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#things" />
+  </s:Class>
+
+  <s:Class about="http://www.w3.org/2000/07/hs78/algernon#sets">
+    <s:label>sets</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#objects" />
+  </s:Class>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#things">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#sets" />
+  </r:Description>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#objects">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#sets" />
+  </r:Description>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#sets">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#sets" />
+  </r:Description>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#slots">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#sets" />
+  </r:Description>
+
+  <s:Class
+  about="http://www.w3.org/2000/07/hs78/algernon#booleans">
+    <s:label>booleans</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#objects" />
+  </s:Class>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#true">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#booleans" />
+  </r:Description>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#false">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#booleans" />
+  </r:Description>
+
+  <s:Class
+  about="http://www.w3.org/2000/07/hs78/algernon#contexts">
+    <s:label>contexts</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#objects" />
+  </s:Class>
+
+  <r:Description
+  about="http://www.w3.org/2000/07/hs78/algernon#global-context">
+    <r:type
+    resource="http://www.w3.org/2000/07/hs78/algernon#contexts" />
+  </r:Description>
+
+  <s:Class about="http://www.w3.org/2000/07/hs78/algernon#slots">
+    <s:label>slots</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#things" />
+  </s:Class>
+
+  <s:Class
+  about="http://www.w3.org/2000/07/hs78/algernon#order-relations">
+    <s:label>order-relations</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#slots" />
+  </s:Class>
+
+  <s:Class
+  about="http://www.w3.org/2000/07/hs78/algernon#tc-order-relations">
+
+    <s:label>tc-order-relations</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#order-relations" />
+  </s:Class>
+
+  <s:Class
+  about="http://www.w3.org/2000/07/hs78/algernon#equivalence-relations">
+
+    <s:label>equivalence-relations</s:label>
+
+    <s:subClassOf
+    resource="http://www.w3.org/2000/07/hs78/algernon#tc-order-relations" />
+  </s:Class>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#isa"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    isa</s:label>
+
+    <s:domain
+    resource="http://www.w3.org/2000/07/hs78/algernon#things"
+    xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="" />
+
+    <s:range
+    resource="http://www.w3.org/2000/07/hs78/algernon#sets"
+    xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="" />
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">(isa
+    ?x ?s) = ?x is a member of the set ?s.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#member"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    member</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    (member ?s ?x) = A member of ?s is ?x.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#subset"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    subset</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    (subset ?s1 ?s2) = A subset of ?s1 is ?s2.</s:comment>
+  </Property>
+
+  <Property
+  about="http://www.w3.org/2000/07/hs78/algernon#superset"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    superset</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    (superset ?s1 ?s2) = A superset of ?s1 is ?s2.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#selfset"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    selfset</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">The
+    selfset of x is the set {x}.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#less"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    less</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">(less
+    ?x ?y) = ?x less than ?y.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#greater"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    greater</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    (greater ?x ?y) = ?x greater than ?y.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#equal"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    equal</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">(equal
+    ?x ?y) = ?x is equal to ?y.</s:comment>
+  </Property>
+
+  <Property about="http://www.w3.org/2000/07/hs78/algernon#least"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    least</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">(least
+    ?x ?s) = ?x is the least member of ?s.</s:comment>
+  </Property>
+
+  <Property
+  about="http://www.w3.org/2000/07/hs78/algernon#greatest"
+  xmlns="http://www.w3.org/2000/01/rdf-schema#">
+    <s:label xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    greatest</s:label>
+
+    <s:comment xmlns:h="http://www.w3.org/1999/xhtml"
+    xmlns:inf="http://www.w3.org/2000/04shoe-swell/inference#"
+    xmlns:kif="http://www.w3.org/2000/07/hs78/KIF#"
+    xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:s="http://www.w3.org/2000/01/rdf-schema#" xmlns="">
+    (greatest ?x ?s) = ?x is the greatest member of ?s.</s:comment>
+  </Property>
+
+  <kif:wtr>
+    <kif:first
+    resource="http://www.w3.org/2000/07/hs78/KIF?word=%3d%3e" />
+
+    <kif:rest>
+      <kif:list>
+        <kif:first>
+          <kif:list>
+            <kif:first
+            resource="http://www.w3.org/2000/07/hs78/KIF?word=and" />
+
+            <kif:rest>
+              <kif:list>
+                <kif:first>
+                  <r:Statement>
+                    <predicate
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#isa"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                    <subject
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fx"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                    <object
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#things"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                  </r:Statement>
+                </kif:first>
+
+                <kif:rest>
+                  <kif:list>
+                    <kif:first>
+                      <r:Statement>
+                        <predicate
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#isa"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                        <subject
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fx"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                        <object
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fs1"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                      </r:Statement>
+                    </kif:first>
+
+                    <kif:rest>
+                      <kif:list>
+                        <kif:first>
+                          <r:Statement>
+                            <predicate
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#imp-superset"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                            <subject
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fs1"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                            <object
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fs2"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                          </r:Statement>
+                        </kif:first>
+
+                        <kif:rest
+                        resource="http://www.w3.org/2000/07/hs78/KIF#nil" />
+                      </kif:list>
+                    </kif:rest>
+                  </kif:list>
+                </kif:rest>
+              </kif:list>
+            </kif:rest>
+          </kif:list>
+        </kif:first>
+
+        <kif:rest>
+          <kif:list>
+            <kif:first>
+              <r:Statement>
+                <predicate
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#isa"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                <subject
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fx"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                <object
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fs2"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+              </r:Statement>
+            </kif:first>
+
+            <kif:rest>
+              <kif:null />
+            </kif:rest>
+          </kif:list>
+        </kif:rest>
+      </kif:list>
+    </kif:rest>
+  </kif:wtr>
+
+  <kif:wtr>
+    <kif:first
+    resource="http://www.w3.org/2000/07/hs78/KIF?word=%3d%3e" />
+
+    <kif:rest>
+      <kif:list>
+        <kif:first>
+          <kif:list>
+            <kif:first
+            resource="http://www.w3.org/2000/07/hs78/KIF?word=and" />
+
+            <kif:rest>
+              <kif:list>
+                <kif:first>
+                  <r:Statement>
+                    <predicate
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#isa"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                    <subject
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fr"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                    <object
+                    resource="http://www.w3.org/2000/07/hs78/KIF?word=http://www.w3.org/2000/07/hs78/algernon#transitive-relations"
+                     xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                  </r:Statement>
+                </kif:first>
+
+                <kif:rest>
+                  <kif:list>
+                    <kif:first>
+                      <r:Statement>
+                        <predicate
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fr"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                        <subject
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fx"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                        <object
+                        resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fy )"
+                         xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                      </r:Statement>
+                    </kif:first>
+
+                    <kif:rest>
+                      <kif:list>
+                        <kif:first>
+                          <r:Statement>
+                            <predicate
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fr"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                            <subject
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fy"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                            <object
+                            resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fz"
+                             xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+                          </r:Statement>
+                        </kif:first>
+
+                        <kif:rest
+                        resource="http://www.w3.org/2000/07/hs78/KIF#nil" />
+                      </kif:list>
+                    </kif:rest>
+                  </kif:list>
+                </kif:rest>
+              </kif:list>
+            </kif:rest>
+          </kif:list>
+        </kif:first>
+
+        <kif:rest>
+          <kif:list>
+            <kif:first>
+              <r:Statement>
+                <predicate
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fr"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                <subject
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fx"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+
+                <object
+                resource="http://www.w3.org/2000/07/hs78/KIF?word=%3fz"
+                 xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
+              </r:Statement>
+            </kif:first>
+
+            <kif:rest>
+              <kif:null />
+            </kif:rest>
+          </kif:list>
+        </kif:rest>
+      </kif:list>
+    </kif:rest>
+  </kif:wtr>
+</r:RDF>
+
