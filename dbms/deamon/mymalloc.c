@@ -1,9 +1,27 @@
-/* Simple debugging mallic, when/if needed 
- * $Id: mymalloc.c,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
+ *
+ * NOTICE
+ *
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
+ *
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ * Simple debugging malloc, when/if needed 
+ *
+ * $Id: mymalloc.c,v 1.10 2004/08/19 18:57:37 areggiori Exp $
  */
+#include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
+
+#include "dbmsd.h"
+
 #include "deamon.h"
 #include "mymalloc.h" 	/* to keep us honest */
-#include "dbms.h"
 
 char * memdup( void * data, size_t size ) {
         void * out = mymalloc( size );
@@ -14,7 +32,7 @@ char * memdup( void * data, size_t size ) {
         }  
 
 
-#ifdef DEBUG_MALLOC
+#ifdef RDFSTORE_DBMS_DEBUG_MALLOC
 struct mp {
 	void * data;
 	int line;
@@ -34,7 +52,7 @@ void * debug_malloc( size_t len, char * file, int line ) {
 	p->data = malloc( len );
 	if (p->data==NULL)
 		return NULL;
-#ifdef DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG
 	bzero(p->data,len);
 #endif
 	p->tal = time(NULL);
@@ -55,14 +73,14 @@ void debug_free( void * addr, char * file, int line ) {
 			break;
 
 	if (!*p) {
-		log(L_ERROR,"Unanticipated Free from %s:%d",file,line);
-#ifdef DEBUG
+		dbms_log(L_ERROR,"Unanticipated Free from %s:%d",file,line);
+#ifdef RDFSTORE_DBMS_DEBUG
 		abort();
 #endif
 		};
 	q = *p; 
 	*p=(*p)->nxt;
-#ifdef DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG
 	bzero(q->data,q->len);
 #endif
 	free(q->data);
@@ -72,16 +90,21 @@ void debug_free( void * addr, char * file, int line ) {
 	mpfree++;
 	}
 
-void debug_malloc_dump() {
+void debug_malloc_dump(FILE * f) {
         struct mp * p; 
 	TIMESPEC now=time(NULL);
+	unsigned int t = 0;
 
-        log(L_DEBUG,"Memory==malloc %d == %d free",mpalloc,mpfree);
-        for( p = mfirst; p; p=p->nxt)
-                log(L_DEBUG,"%s %d size %d age %f",
+        fprintf(f,"Memory==malloc %d == %d free\n",mpalloc,mpfree);
+        for( p = mfirst; p; p=p->nxt) {
+                fprintf(f,"%05d(%s) %12s %5d size %9d age %.0f at %p\n",
+			getpid(),mum_pid ? "Chd" : "Mum",
                         p->file,p->line,p->len,
-                        difftime(now,p->tal)
+                        difftime(now,p->tal),
+			p->data
                         );
-        }
-
+		t+=p->len;
+	}
+        fprintf(f,"Total %u bytes\n",t);
+}
 #endif

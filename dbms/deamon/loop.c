@@ -1,47 +1,25 @@
-/* DBMS Server
- * $Id: loop.c,v 1.2 2001/06/18 15:26:18 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * NOTICE
  *
- * based on UKDCils
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
-
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: loop.c,v 1.17 2004/08/19 18:57:36 areggiori Exp $
+ */ 
 #include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
 #include "dbmsd.h"
 
 #include "deamon.h"
 #include "handler.h"
-#include "mymalloc.h"
 
 /* for debugging..
  */
@@ -71,18 +49,24 @@ show(
 void flush_all( void ) { 
 	dbase * p;
 	int one = 0;
+	int fd;
 
 	for(p=first_dbp; p;p=p->nxt) 
 		if (p->handle) {
 			(p->handle->sync)(p->handle,0);
-			fsync( (p->handle->fd)(p->handle) );
+#ifdef DB_VERSION_MAJOR
+			(p->handle->fd)(p->handle, &fd);
+#else
+			fd = (p->handle->fd)(p->handle);
+#endif
+			fsync( fd );
 			one++;
 		};
 
 	if (one)
 		sync();
 
-	log(L_INFORM,"Synced %d databases and the file system",one);
+	dbms_log(L_INFORM,"Synced %d databases and the file system",one);
 	}
 
 void
@@ -114,7 +98,7 @@ select_loop( void )
 		 */	
 		if ((n=select(maxfd+1,&rset,&wset,&eset,np)) < 0) {
 			if (errno != EINTR )
-				log(L_ERROR,"RWE Select Probem %s",strerror(errno));
+				dbms_log(L_ERROR,"RWE Select Probem %s",strerror(errno));
 			continue;
 			};
 
@@ -131,7 +115,7 @@ select_loop( void )
 			// a dbase but no clients ?
 			assert(! first_dbp);
 
-			log(L_INFORM,"Nothing to do, this child stops..");
+			dbms_log(L_INFORM,"Nothing to do, this child stops..");
 
 			exit(0);
 			}
@@ -146,10 +130,10 @@ select_loop( void )
 			/* next round, we can wait for just about forever */
 			// if (n == 0) np = NULL;  XXX not needed
 		};
-		log(L_DEBUG,"Read  : %s",show(maxfd+1,&allrset,&rset));
-		log(L_DEBUG,"Write : %s",show(maxfd+1,&allrset,&wset));
-		log(L_DEBUG,"Except: %s",show(maxfd+1,&allrset,&eset));
-exit;
+		dbms_log(L_DEBUG,"Read  : %s",show(maxfd+1,&allrset,&rset));
+		dbms_log(L_DEBUG,"Write : %s",show(maxfd+1,&allrset,&wset));
+		dbms_log(L_DEBUG,"Except: %s",show(maxfd+1,&allrset,&eset));
+
 		/* Is someone knocking on our front door ? 
 		 */
 		if ((sockfd>=0) && (FD_ISSET(sockfd,&rset))) {
@@ -158,25 +142,36 @@ exit;
 			int fd;
 
 			if (mum_pid) 
-				log(L_ERROR,"Should not get such an accept()");
+				dbms_log(L_ERROR,"Should not get such an accept()");
 			else 
         		if ((fd = accept(sockfd, 
 				    ( struct sockaddr *) &client, &len)) <0) 
-                		log(L_ERROR,"Could not accept");
+                		dbms_log(L_ERROR,"Could not accept");
 			else {
-                		log(L_DEBUG,"Accept(%d)",fd);
-				handle_new_connection(fd, C_NEW_CLIENT); 
-				};
-			};
+				tops level = allowed_ops(client.sin_addr.s_addr);
+                		dbms_log(L_DEBUG,"Accept(%d) op level for IP=%s: %s",
+					fd,inet_ntoa(client.sin_addr),op2string(level));
+
+				if (level > T_NONE)
+					handle_new_connection(fd, C_NEW_CLIENT, client); 
+				else {
+					dbms_log(L_ERROR,"Accept violation: %s rejected.",
+						inet_ntoa(client.sin_addr));
+					close(fd);
+				}
+			}
+		}
 
 		/* note that for the pthreads we rely on a mark-and-sweep
 		 * style of garbage collect.
 		 */
-		for ( s=client_list; s != NULL; ) {	
+	if (client_list != NULL) for ( s = client_list; s != NULL; ) {	
 			/* Page early, as the record might get zapped
 			 * and taken out of the lists in this loop.
 			 */
+			assert( s != NULL );
 			r=s; s=r->next;
+
 			assert( r != s );
 			if (r->close)
 				continue;
@@ -184,11 +179,11 @@ exit;
 			if (FD_ISSET(r->clientfd,&rset)) {
 				int trapit=getpid(); // trap forks.
 				if (r->tosend != 0) {
-					log(L_ERROR,"read request received while working on send");
+					dbms_log(L_ERROR,"read request received while working on send");
 					zap(r);
 					continue;
 					} 
-				log(L_DEBUG,"read F=%d R%d W%d E%d",
+				dbms_log(L_DEBUG,"read F=%d R%d W%d E%d",
 					r->clientfd,
 					FD_ISSET(r->clientfd,&rset) ? 1 : 0,
 					FD_ISSET(r->clientfd,&wset) ? 1 : 0,
@@ -213,7 +208,7 @@ exit;
 				if (r->tosend >= 0 )
 					continue_send(r);
 				else
-					log(L_ERROR,"write select while not expecting to write");
+					dbms_log(L_ERROR,"write select while not expecting to write");
 #ifdef TIMEOUT
 				r->last=time(NULL);
 #endif
@@ -226,7 +221,7 @@ exit;
 // only seen on linux-RH5.1
 //
 			if (FD_ISSET(r->clientfd,&eset)) {
-				log(L_ERROR,"Some exception. Unexpected");
+				dbms_log(L_ERROR,"Some exception. Unexpected");
 				r->close = 1; MX;
 #ifdef TIMEOUT
 				r->last=time(NULL);
@@ -238,7 +233,7 @@ exit;
 				r->close =1; MX;
 				};
 #endif
-			}; /* client set loop */
+		}; /* client set loop */
 
 		/* clean up operations... 
 		 *    note the order 
@@ -247,10 +242,10 @@ exit;
 			r=s; s=r->next;
 			assert( r != s );
 			if ( r->close ) {
-				log(L_DEBUG,"General clean %d",r->clientfd);
+				dbms_log(L_DEBUG,"General clean %d",r->clientfd);
 				zap(r);	
 				};
-			};
+		};
 
 #ifdef FORKING
 		for(d=children;d;) {

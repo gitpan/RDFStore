@@ -1,8 +1,8 @@
-#!/usr/local/bin/perl -I ../lib
+#!/usr/bin/perl
 ##############################################################################
-# 	Copyright (c) 2000 All rights reserved
+# 	Copyright (c) 2000-2004 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
-#
+#	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -18,17 +18,22 @@
 #
 # 3. The end-user documentation included with the redistribution,
 #    if any, must include the following acknowledgment:
-#       "This product includes software developed by
+#       "This product includes software developed by 
 #        Alberto Reggiori <areggiori@webweaving.org> and
 #        Dirk-Willem van Gulik <dirkx@webweaving.org>."
 #    Alternately, this acknowledgment may appear in the software itself,
 #    if and wherever such third-party acknowledgments normally appear.
 #
-# 4. Neither the name of the University nor the names of its contributors
+# 4. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#    This product includes software developed by the University of
+#    California, Berkeley and its contributors. 
+#
+# 5. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
-# 5. Products derived from this software may not be called "RDFStore"
+# 6. Products derived from this software may not be called "RDFStore"
 #    nor may "RDFStore" appear in their names without prior written
 #    permission.
 #
@@ -47,53 +52,42 @@
 #
 # ====================================================================
 #
-# This software consists of work developed by Alberto Reggiori and
-# Dirk-Willem van Gulik and was originally based on public domain software
-# written at the Stanford University Database Group by Sergey Melnik.
-# For more information on the RDF API Draft work, 
+# This software consists of work developed by Alberto Reggiori and 
+# Dirk-Willem van Gulik. The RDF specific part is based on public 
+# domain software written at the Stanford University Database Group by 
+# Sergey Melnik. For more information on the RDF API Draft work, 
 # please see <http://www-db.stanford.edu/~melnik/rdf/api.html>
+# The DBMS TCP/IP server part is based on software originally written
+# by Dirk-Willem van Gulik for Web Weaving Internet Engineering m/v Enschede,
+# The Netherlands.
 #
 ##############################################################################
 
-use RDFStore;
+use RDFStore::NodeFactory;
+use RDFStore::Model;
+use RDFStore::Parser::SiRPAC;
+use RDFStore::Parser::NTriples;
 use Carp;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] -stuff <URL_or_filename> [-compression] [-freetext] [-strawman] [-rdfcore] [-bagIDs] [-GenidNumberFile] [-output_dir <valid_directoryname>] [-storename <IDENTIFIER>] [-style <BerkeleyDB|DB_File|DBMS>] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise] [-namespace <URL_or_filename>]
+    $0 [-h] [-ntriples] [-freetext] [-storename <IDENTIFIER>] [-serialize <syntax>] [-base <URL_or_filename>] [-Context <URI_or_bNode>] [-sync] [-owl:imports] <URL_or_filename>
 
-Parse an input RDF file and optionally store the generated triplets into a Data::MagicTie(3) database using the RDFStore(3) API.
+Parse an input RDF file and optionally store the generated triplets into a RDFStore(3) database.
 
 -h	Print this message
 
--stuff	<URL_or_filename>
-		URL or filename. '-' denotes STDIN
+[-ntriples]
+	parse input stuff as N-Triples  - default is RDF/XML
 
 [-v]	Be verbose
 
-[-strawman]
-		RDFStore::Parser::OpenHealth parser, RDFStore::Parser::SiRPAC otherwise.
-
-[-bagIDs]
-		generates Bag instances for each Description block.
-
-[-rdfcore]
-		uses W3C RDF Core WG recommandated syntax
-
-[-GenidNumberFile]
-		EXISTING valid filename containing a single integer value to seed the parser "genid" numbers with the given value (I.e. for anonymous resources). Note that an exclusive lock on the file is used to guarantee that the value is consistent across runs (and concurrent processes)
-
-[-output_dir <valid_directoryname>]
-		Output directory for DB files generated. Default is cwd.
-
 [-storename <IDENTIFIER>]
-		A label or identifier to identify the RDFStore database. By setting this option the parsing results 
-		are stored in DB files. Default is to use in-memory datastructures. To use rdfquery.pl later you want 
-		to set 1 here :-)
-		(see -output_dir also)
+		RDFStore database name IDENTIFIER is like rdfstore://[HOSTNAME[:PORT]]/PATH/DBDIRNAME
 
-[-compression]
-                Use RLE encoding in the persistent RDFStore model
+			E.g. URLs
+					rdfstore://mysite.foo.com:1234/this/is/my/rd/store/database
+					rdfstore:///root/this/is/my/rd/store/database
 
 [-freetext]
 		Generates free-text searchable database
@@ -102,65 +96,75 @@ Parse an input RDF file and optionally store the generated triplets into a Data:
 		Specify a string to set a base URI to use for the generation of 
 		resource URIs during parsing
 
-[-style <BerkeleyDB|DB_File|DBMS>]
-		BerkeleyDB, DB_File or DBMS store. Default is DB_File.
+[-serialize RDF/XML | NTriples ]
+		generate RDF/XML or NTriples syntax
 
-[-split <number>]
-		Number of DB files to split around - see Data::MagicTie(3)
+[-Context <URI_or_bNode>]
+		Specify a resource to set a kind of context for the statements e.g. _:lmn20031127
 
-[-dbms_host <hostname>]
-		Name or IP number of the DBMS host. This option makes sense only using the DBMS style; default is 'localhsot' see man dbmsd(8)
+[-sync]
+		Sync databse after each statement insertion - this is option si off by default and it is generally very
+		expensive in terms of I/O operations.
 
-[-dbms_port <port>]
-		TCP/IP port number of the DBMS host. This option makes sense only using the DBMS style; default is 1234
-[-serialise]
-		generate strawman RDF output
+[-owl:imports]
+		Process owl:imports statements specially and include into output result related ontologies.
+
+[-GenidNumberFile]
+		EXISTING valid filename containing a single integer value to seed the parser "genid" numbers with the given value (I.e. for anonymous resources). Note that an exclusive lock on the file is used to guarantee that the value is consistent across runs (and concurrent processes)
+
+[-delete]
+		Remove instead of insert statements as passed into the input RDF file/source - as special case (if confirmed
+		after prompt to the user or yes option enabled) when no input source is specified the WHOLE database is cleared.
+		*WARNING* this operation is can not be undone!
+
+[-y]
+		Assume a yes response to all questions asked; this should be used with great caution as this is a free license
+		to confirm permanent chnages to the database like deletion of data.
+
+Main paramter is URL or filename to parser; '-' denotes STDIN.
 
 EOU
 
 # Process options
 print $Usage and exit if ($#ARGV<0);
 
-my ($rdfcore,$compression,$freetext,$GenidNumberFile, $verbose,$namespace,$storename,$strawman,$stuff,$style,$split,$output_dir,$dbms_host,$dbms_port,$serialise);
-my $bagIDs=0;
-while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
+my ($sync,$delete,$yes,$delete,$owl_imports,$Context,$ntriples,$freetext,$GenidNumberFile, $verbose,$namespace,$storename,$strawman,$stuff,$output_dir,$dbms_host,$dbms_port,$serialize);
+$sync = 0;
+$delete = 0;
+$yes = 0;
+while (defined($ARGV[0])) {
     my $opt = shift;
 
     if ($opt eq '-stuff') {
+	print STDERR "WARNING! -stuff option is deprecated - input source is defined to be last passed argument now\n";
         $stuff = shift;
+    } elsif ($opt eq '-Context') {
+        $Context = shift;
     } elsif ($opt eq '-namespace') {
         $namespace = shift;
     } elsif ($opt eq '-GenidNumberFile') {
         $GenidNumberFile = shift;
-    } elsif ($opt eq '-rdfcore') {
-        $rdfcore = 1;
-    } elsif ($opt eq '-compression') {
-        $compression = 1;
     } elsif ($opt eq '-freetext') {
         $freetext = 1;
-    } elsif ($opt eq '-serialise') {
-        $serialise = 1;
     } elsif ($opt eq '-strawman') {
         $strawman = 1;
+    } elsif ($opt eq '-sync') {
+        $sync = 1;
+    } elsif ($opt eq '-ntriples') {
+        $ntriples = 1;
     } elsif ($opt eq '-storename') {
         $storename = shift;
-	$storename .= '/'
-		unless(	(not(defined $storename)) || 
-			($storename eq '') || 
-			($storename =~ /\s+/) || 
-			($storename =~ /\/$/) );
-    } elsif ($opt eq '-style') {
-	$style=shift;
     } elsif ($opt eq '-h') {
         print $Usage;
         exit;
+    } elsif ($opt eq '-delete') {
+	$delete=1;
+    } elsif ($opt eq '-y') {
+	$yes=1;
     } elsif ($opt eq '-v') {
 	$verbose=1;
-    } elsif ($opt eq '-bagIDs') {
-        $bagIDs = 1;
-    } elsif ($opt eq '-split') {
-	$opt=shift;
-        $split = (int($opt)) ? $opt : 0;
+    } elsif ($opt eq '-owl:imports') {
+        $owl_imports = 1;
     } elsif ($opt eq '-output_dir') {
 	$opt=shift;
         $output_dir = $opt
@@ -170,15 +174,47 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
 			($output_dir eq '') || 
 			($output_dir =~ /\s+/) || 
 			($output_dir =~ /\/$/) );
+    } elsif ($opt eq '-serialize') {
+        $serialize = shift;
     } elsif ($opt eq '-dbms_host') {
         $dbms_host = shift;
     } elsif ($opt eq '-dbms_port') {
 	$opt=shift;
         $dbms_port = (int($opt)) ? $opt : undef;
     } else {
-        die "Unknown option: $opt\n$Usage";
-    };
+	$stuff = $opt; #last is file/URL is not specificed with -stuff (which is deprecated)
+    	};
 };
+
+my $factory=new RDFStore::NodeFactory();
+
+#special case - no source and delete and confirmed
+if(	(!$stuff) &&
+	($storename) &&
+	($delete) ) {
+	my $in_context = ($Context) ? " in context '$Context'" : '';
+	confirm("\n*WARNINIG* This operation can not be undone!!\n\nAre you sure you want to clear the whole '$storename' database$in_context? (^C to kill, any key to continue)\n\n")
+		unless($yes);
+
+	# zap the whole model
+	my $model = new RDFStore::Model( Name => $output_dir.$storename,
+					 Host => $dbms_host, 
+					 Port => $dbms_port, 
+					 NodeFactory => $factory,
+					 FreeText     =>      $freetext,
+					 Context => ( (defined $Context) ? $Context : undef ) );
+	my $all = $model->elements;
+	if($all->size<=0) {
+		warn "Database '$storename' is empty.\n";
+		exit;
+		};
+	while ( my $st = $all->each ) {
+		$model->remove($st);
+
+		print "Removed statement ".$st->toString."\n"
+			if($verbose);
+		};
+	};
 
 my $cnt;
 if(	(defined $GenidNumberFile) &&
@@ -203,50 +239,57 @@ if(	(defined $GenidNumberFile) &&
 };
 
 my $pt;
-if($strawman) {
-	$pt = 'OpenHealth';
+if($ntriples) {
+        $pt = 'NTriples';
 } else {
-	$pt = 'SiRPAC';
+        $pt = 'SiRPAC';
 };
 $pt = 'RDFStore::Parser::'.$pt;
 
+if($Context) {
+	if($Context =~ m/^_:(.*)/) {
+		$Context = $factory->createAnonymousResource($1);
+	} else {
+		$Context = $factory->createResource($Context);
+		};
+	};
+
 my $p=new ${pt}(
 				ErrorContext => 	3, 
-				Style => 		'RDFStore::Parser::Styles::MagicTie',
-				NodeFactory => 		new RDFStore::NodeFactory(),
+				Style => 		'RDFStore::Parser::Styles::RDFStore::Model',
+				NodeFactory => 		$factory,
 				Source	=> 		(defined $namespace) ?
 								$namespace :
 								($stuff =~ /^-/) ? undef : $stuff,
 				bCreateBags =>		(defined $bagIDs) ? $bagIDs : undef,
 				GenidNumber => $cnt,
-				RDFCore_Issues	=>	$rdfcore,
 				store	=>	{
-							seevalues => 	$verbose,
-							options		=> 	{
+							'seevalues' => 	$verbose,
+							'owl:imports' => $owl_imports,
+							'delete' => ($delete) ? 1 : undef,
+							'confirm' => ($yes) ? 1 : undef,
+							'options'		=> 	{	
 										Name	=> 	$output_dir.$storename,
-										Style	=>	$style,
 										Host =>	$dbms_host,
 										Port =>	$dbms_port,
-										Split	=>	$split,
-										Compression     =>      $compression,
 										FreeText     =>      $freetext,
-										Sync    => 1 }
+										Sync    => $sync,
+										Context	=> ( (defined $Context) ? $Context : undef ) }
 						}
 				);
 
 my $m;
 if($stuff =~ /^-/) {
 	# for STDIN use no-blocking
-	my $nbp = $p->parse_start($namespace);
-	while(<STDIN>) {
-		$nbp->parse_more($_);
-	};
-	$m = $nbp->parse_done();
+	$m = $p->parsestream(*STDIN,$namespace);
 } else {
 	$m = $p->parsefile($stuff);
 };
-if(	(defined $GenidNumberFile) &&
-	(-e $GenidNumberFile) ) {
+if(defined $GenidNumberFile) {
+	unless(-e $GenidNumberFile) {
+		open(FH,">".$GenidNumberFile)
+			or die "Failed to create genid counter file $!";
+		};
 	$cnt = $p->getReificationCounter();
 	seek FH,0,0
         	or die "Failed to seek $!";
@@ -261,6 +304,13 @@ if(	(defined $GenidNumberFile) &&
         	if ($?);
 };
 
-if($serialise) {
-	print $m->toStrawmanRDF(),"\n";
-};
+$m->serialize(*STDOUT,$serialize)
+	if($serialize);
+
+sub confirm {
+	my ($msg) = @_;
+
+	print $msg;
+
+	return <STDIN>;
+	};

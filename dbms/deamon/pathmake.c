@@ -1,31 +1,22 @@
-/* $Id: pathmake.c,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * NOTICE
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
+ *
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: pathmake.c,v 1.8 2004/08/19 18:57:37 areggiori Exp $
+ */ 
 
 #include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
 #include "deamon.h"
 #include "pathmake.h"
 
@@ -56,7 +47,7 @@ mkpath(char * base, char * infile)
 		base="/";
 
 	if (inpath==NULL || inpath[0] == '\0') {
-		log(L_ERROR,"No filename or path for the database specified");
+		dbms_log(L_ERROR,"No filename or path for the database specified");
 		return NULL;
 		};
 
@@ -80,7 +71,7 @@ mkpath(char * base, char * infile)
 		};
 
 	if (!strlen(file)) {
-		log(L_ERROR,"No filename for the database specified");
+		dbms_log(L_ERROR,"No filename for the database specified");
 		return NULL;
 		};
  
@@ -134,18 +125,18 @@ mkpath(char * base, char * infile)
 			/* something exists.. it must be a directory 
 			 */
 			if ((s.st_mode & S_IFDIR) == 0) {
-				log(L_ERROR,"Creation of %s failed; path element not directory",tmp);
+				dbms_log(L_ERROR,"Creation of %s failed; path element not directory",tmp);
 				return NULL;
 				};
 			} 
 		else if ( errno == ENOENT ) {
     			if ((mkdir(tmp,(S_IRWXU | S_IRWXG | S_IRWXO))) != 0) {
-				log(L_ERROR,"Creation of %s failed; %s",tmp, strerror(errno));
+				dbms_log(L_ERROR,"Creation of %s failed; %s",tmp, strerror(errno));
 				return NULL;
 				};
 			} 
    		 else {
-			log(L_ERROR,"Path creation to failed at %s:%s",tmp,strerror(errno));
+			dbms_log(L_ERROR,"Path creation to failed at %s:%s",tmp,strerror(errno));
 			return NULL;
     			};
    		 dirname=slash;

@@ -1,5 +1,6 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -7,7 +8,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://rdfstore.jrc.it/LICENSE
+# *     http://rdfstore.sourceforge.net/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -44,15 +45,24 @@
 # *		- added getOptions() method
 # *		- Devon Smith <devon@taller.pscl.cwru.edu> changed getDigestBytes() to generate digests and hashes
 # *               that match Stanford java ones exactly
-# *		- added inheritance from RDFStore::Stanford::Digest::Digestable
-# *		- removed RDFStore::Stanford::Resource inheritance
+# *		- added inheritance from RDFStore::Digest::Digestable
+# *		- removed RDFStore::Resource inheritance
 # *     version 0.41
 # *             - updated _getLookupValue() and _getValuesFromLookup() to consider negative hashcodes
 # *     version 0.42
 # *		- complete redesign of the indexing method up to free-text search on literals
 # *		- added tied array iterator RDFStore::Model::Statements to allow fetching results one by one
 # *		- modified find() to allow a 4th paramater to make free-text search over literals
-# *
+# *     version 0.43
+# *		- brand new design now using the faster C/XS RDFStore(3) module....finally :)
+# *		- updated methods to avoid a full copy of statements across when the model is shared if possible
+# *		- added basic support for statements grouping - see setContext(), getContext() and resetContext()
+# *		- zapped toStrawmanRDF() method
+# *		- added serialize() method to generally dump a model/graph to a string or filehanlde
+# *		- added isConnected() and isRemote() methods
+# *		- added unite(), subtract(), intersect(), complement() and exor() methods
+# *		- re-added RDFStore::Resource inheritance
+# *		- added getParser(), getReader(), getSerializer() and getWriter() methods
 # *
 
 package RDFStore::Model;
@@ -60,19 +70,24 @@ package RDFStore::Model;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.42';
+$VERSION = '0.43';
 
 use Carp;
-use RDFStore::Stanford::Digest;
-use RDFStore::Stanford::Digest::Digestable;
-use RDFStore::Stanford::Model;
+
+use RDFStore;
+use RDFStore::Digest::Digestable;
 use RDFStore::Literal;
+use RDFStore::Resource;
+use RDFStore::Object;
 use RDFStore::Statement;
 use RDFStore::NodeFactory;
-use RDFStore::Stanford::Digest::Util;
-use Data::MagicTie; # the storge module
+use RDFStore::Parser::SiRPAC;
+use RDFStore::Parser::NTriples;
+use RDFStore::Serializer::RDFXML;
+use RDFStore::Serializer::NTriples;
+use RDFStore::Util::Digest;
 
-@RDFStore::Model::ISA = qw( RDFStore::Stanford::Model RDFStore::Stanford::Digest RDFStore::Stanford::Digest::Digestable );
+@RDFStore::Model::ISA = qw( RDFStore::Resource RDFStore::Digest::Digestable );
 
 sub new {
         my ($pkg,%params) = @_;
@@ -83,137 +98,129 @@ sub new {
         $self->{nodeFactory}=(  (exists $params{nodeFactory}) &&
                                 (defined $params{nodeFactory}) &&
                                 (ref($params{nodeFactory})) &&
-                                ($params{nodeFactory}->isa("RDFStore::Stanford::NodeFactory")) ) ?
+                                ($params{nodeFactory}->isa("RDFStore::NodeFactory")) ) ?
                                 $params{nodeFactory} : new RDFStore::NodeFactory();
-	
+
         $self->{options} = \%params;
 
+	#store
+	my @params = ();
+	
+	if (	(exists $params{Name}) && 
+		(defined $params{Name}) ) {
+		push @params, $params{Name};
+	} else {
+		push @params,undef;
+		};
+	if (	(exists $params{Mode}) && 
+		(defined $params{Mode}) ) {
+		push @params, ($params{Mode} eq 'r') ? 1 : 0;
+	} else {
+		push @params,0;
+		};
+	if (	(exists $params{FreeText}) && 
+		(defined $params{FreeText}) ) {
+		push @params, ($params{FreeText} =~ /(1|on|yes|true)/i) ? 1 : 0;
+	} else {
+		push @params,0;
+		};
+	if (	(exists $params{Sync}) && 
+		(defined $params{Sync}) ) {
+		push @params, int($params{Sync});
+	} else {
+		push @params,0;
+		};
+	if (	(	(exists $params{Host}) && 
+			(defined $params{Host}) ) ||
+		(	(exists $params{Port}) && 
+			(defined $params{Port}) ) ) {
+		push @params, 1;
+	} else {
+		push @params, 0;
+		};
+	if (	(exists $params{Host}) && 
+		(defined $params{Host}) ) {
+		push @params, $params{Host};
+	} else {
+		push @params,undef;
+		};
+	if (	(exists $params{Port}) && 
+		(defined $params{Port}) ) {
+		push @params, $params{Port};
+	} else {
+		push @params,undef;
+		};
+
+	$self->{rdfstore} = new RDFStore( @params );
+
+        die "Cannot connect rdfstore"
+		unless(	(defined $self->{rdfstore}) &&
+			(ref($self->{rdfstore})) &&
+			($self->{rdfstore}->isa("RDFStore")) );
+
         bless $self,$pkg;
+
+	return $self;
 };
 
-# connect/create/attach to the database
-sub _tie {
-        my ($class) = @_;
- 
-	return $_[0]->{Shared}->_tie
-		if(	(exists $_[0]->{Shared}) &&
-			(defined $_[0]->{Shared}) );
-        eval {
-                # lookup tables
-                $class->{literals} = {}; # literals
-                $class->{resources} = {}; #resources
-                $class->{namespaces} = {}; #namespaces
-                $class->{statements} = {}; #statements
-                $class->{Windex} = {}; # a sparse 3 dimensional matrix that apply a free-text like indexing to triples
-		my $orig_name = $class->{options}->{Name}
-                        if(     (exists $class->{options}->{Name}) &&
-                                (defined $class->{options}->{Name}) &&
-                                ($class->{options}->{Name} ne '') &&
-                                ($class->{options}->{Name} !~ m/^\s+$/) );
- 
-                #we separate the Data::MagicTie options and zap the ones not needed
-                my %params = %{$class->{options}};
- 
-                $params{Name} = $orig_name.'/literals'
-                        if(defined $orig_name);
-                $class->{literals_db} = tie %{$class->{literals}},'Data::MagicTie',%params;
-                $class->{options}->{Literals}=$class->{literals_db}->get_Options;
+# set a context for the statements (i.e. each asserted statement will get such a context automatically)
+# NOTE: this stuff I can not still understand how could be related to reification/logic/inference but it should...
+sub setContext {
+	my ($class,$context)=@_;
 
-		$params{Name} = $orig_name.'/resources'
-                        if(defined $orig_name);
-                $class->{resources_db} = tie %{$class->{resources}},'Data::MagicTie',%params;
-                $class->{options}->{Resources}=$class->{resources_db}->get_Options;
- 
-                $params{Name} = $orig_name.'/namespaces'
-                        if(defined $orig_name);
-                $class->{namespaces_db} = tie %{$class->{namespaces}},'Data::MagicTie',%params;
-                $class->{options}->{Namespaces}=$class->{namespaces_db}->get_Options;
+	$class->{rdfstore}->set_context( $context );
+	};
 
-		$params{Name} = $orig_name.'/statements'
-                        if(defined $orig_name);
-                $class->{statements_db} = tie %{$class->{statements}},'Data::MagicTie',%params;
-                $class->{options}->{Statements}=$class->{statements_db}->get_Options;
- 
-                #initialize statements counter(s) if necessary
-                my $cnt = $class->{statements}->{add_counter}; #FETCH
-                $class->{statements}->{add_counter}=-1 #STORE
-                        unless(	(defined $cnt) &&
-				(int($cnt)) );
-                $cnt = $class->{statements}->{remove_counter}; #FETCH
-                $class->{statements}->{remove_counter}=-1 #STORE
-                        unless(	(defined $cnt) &&
-				(int($cnt)) );
- 
-                $params{Name} = $orig_name.'/Windex'
-                        if(defined $orig_name);
-                $class->{Windex_db} = tie %{$class->{Windex}},'Data::MagicTie',%params;
-                $class->{options}->{Windex}=$class->{Windex_db}->get_Options;
-        };
-        if($@) {
-                warn "Cannot tie my database storage ".$class->{options}->{Name}." :( - $! $@\n";
-                return;
-        } else {
-                return $class;
-        };
-};     
+# reset the context for the statements (i.e. each asserted statement will be in a *empty* context after calling this method)
+sub resetContext {
+	my ($class)=@_;
 
-# diconnect from the database
-sub _untie {
-	return $_[0]->{Shared}->_untie
-		if(	(exists $_[0]->{Shared}) &&
-			(defined $_[0]->{Shared}) );
+	$class->{rdfstore}->reset_context;
+	};
 
-        delete $_[0]->{literals_db};
-        untie %{$_[0]->{literals}};
-        delete $_[0]->{resources_db};
-        untie %{$_[0]->{resources}};
-        delete $_[0]->{namespaces_db};
-        untie %{$_[0]->{namespaces}};
-        delete $_[0]->{statements_db};
-        untie %{$_[0]->{statements}};
-        delete $_[0]->{Windex_db};
-        untie %{$_[0]->{Windex}};
-}; 
+#return actual defined context of the model
+sub getContext {
+	my ($class)=@_;
 
-# check if the database is connected
-sub _tied {
-	return $_[0]->{Shared}->_tied
-		if(	(exists $_[0]->{Shared}) &&
-			(defined $_[0]->{Shared}) );
+	my $ctx = $class->{rdfstore}->get_context;
 
-        return (        (tied %{$_[0]->{literals}}) &&
-                        (tied %{$_[0]->{resources}}) &&
-                        (tied %{$_[0]->{namespaces}}) &&
-                        (tied %{$_[0]->{statements}}) &&
-                        (tied %{$_[0]->{Windex}}) ) ? 1 : 0;
-};
+	return
+		unless($ctx);
+
+        return ($ctx->isbNode) ? $class->{nodeFactory}->createAnonymousResource($ctx->toString) : $class->{nodeFactory}->createResource($ctx->toString);
+	};
 
 # return model options
 sub getOptions {
 	return %{$_[0]->{'options'}};
-};
+	};
+
+sub isAnonymous {
+        return 0;
+        };
 
 sub getNamespace {
-        return;
-};
+        return undef;
+	};
 
 sub getLocalName {
         return $_[0]->getURI();
-};
+	};
 
 sub toString {
         return "Model[".$_[0]->getSourceURI()."]";
-};
+	};
 
 # Set a base URI for the model
 sub setSourceURI {
-	$_[0]->{uri}=$_[1];
-};
+	$_[0]->{rdfstore}->set_source_uri( (	(ref($_[1])) && ($_[1]->isa("RDFStore::Resource")) ) ? $_[1]->toString : $_[1] );
+	# we shuld probably set it as default context eventually but I am not sure....
+	};
 
 # Returns current base URI for the model
 sub getSourceURI {
-	return $_[0]->{uri};
-};
+	$_[0]->{rdfstore}->get_source_uri;
+	};
 
 # model access methods
 
@@ -221,122 +228,126 @@ sub getSourceURI {
 sub size {
 	if(	(exists $_[0]->{Shared}) &&
 		(defined $_[0]->{Shared}) ) {
-		if(exists $_[0]->{query_model_statement_ids}) {
-			if($#{$_[0]->{query_model_statement_ids}}>=0) {
-				return $#{$_[0]->{query_model_statement_ids}}+1; #save a FETCH
-			} else {
-				return 0; #got an empty query
-			};
+		if(exists $_[0]->{query_iterator}) {
+			return $_[0]->{query_iterator}->size;
 		} else {
-			return $_[0]->{Shared}->size; #i.e. shared model coming from a duplicate()
-		};
+			return $_[0]->{Shared}->size;
+			};
 	};
 
-        $_[0]->_tie
-               	unless($_[0]->_tied);
-
-        (	($_[0]->{statements}->{add_counter}+1)-($_[0]->{statements}->{remove_counter}+1)); #FETCH*2
-};
+        $_[0]->{rdfstore}->size;
+	};
 
 # check whether or not the model is empty
 sub isEmpty {
-        return ($_[0]->size() > 0) ? 0 : 1;
-};
-
-# return a tied ARRAY (iterator) of statements actually in the database - see RDFStore::Model::Statements(3)
-sub elements {
-	my ($class,@ids) = @_;
-
-	@ids=() #hack
-		unless((caller)[0]=~/RDFStore::Model/);
-
-	my $statements;
-	if(	(exists $class->{Shared}) &&
-		(defined $class->{Shared}) ) {
-		return
-			if(	(exists $class->{query_model_statement_ids}) &&
-				($#{$class->{query_model_statement_ids}}<0) ); #we do not return empty queries
-
-		($statements)=$class->{Shared}->elements( 
-			($#ids>=0) ? 
-				@ids : 
-				(	(exists $class->{query_model_statement_ids}) ?
-						@{$class->{query_model_statement_ids}} : () )
-		);
-	} else {
-        	$class->_tie
-        		unless($class->_tied);
-
-		$statements=[];
-        	tie @{$statements},"RDFStore::Model::Statements",$class,@ids;
-	};
-
-        return wantarray ? $statements : $statements->[0]; #FETCH one single statement in scalar context
-};
-
-# tests if the model contains a given statement
-sub contains {
 	if(	(exists $_[0]->{Shared}) &&
 		(defined $_[0]->{Shared}) ) {
-		if(exists $_[0]->{query_model_statement_ids}) {
-			if($#{$_[0]->{query_model_statement_ids}}<0) {
-				return 0; #got an empty query
-			} else {
-				my ($subject_localname_code,$subject_namespace_code) = map {
-                			$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
-        			my ($predicate_localname_code,$predicate_namespace_code) = map {
-                			$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
-        			my ($object_localname_code,$object_namespace_code,$object_literal_code);
-        			if(     (defined $_[1]->object) &&
-                			($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
-                			($object_localname_code,$object_namespace_code) = map {
-                        		$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
-        			} elsif(defined $_[1]->object) {
-                			$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
-        			};
-        			my($num)=$_[0]->{Shared}->_fetchRDFNode(	$subject_localname_code,
-						$subject_namespace_code,
-						$predicate_localname_code,
-						$predicate_namespace_code,
-						$object_localname_code,
-						$object_namespace_code,
-						$object_literal_code);
-				return (grep /^$num$/,@{$_[0]->{query_model_statement_ids}}) ? 1 : 0;
-			};
+		if(exists $_[0]->{query_iterator}) {
+			return ( $_[0]->{query_iterator}->size > 0 ) ? 0 : 1;
 		} else {
-			return $_[0]->{Shared}->contains($_[1]); #i.e. shared model coming from a duplicate()
+			return $_[0]->{Shared}->isEmpty;
+			};
+		};
+        $_[0]->{rdfstore}->is_empty;
+	};
+
+sub isConnected {
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		return $_[0]->{Shared}->isConnected;
+		};
+        $_[0]->{rdfstore}->is_connected;
+	};
+
+sub isRemote {
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		return $_[0]->{Shared}->isRemote;
+		};
+        $_[0]->{rdfstore}->is_remote;
+	};
+
+# return an instance of RDFStore::Model::Iterator
+sub elements {
+	my ($class) = @_;
+
+	if(	(exists $class->{Shared}) &&
+		(defined $class->{Shared}) ) {
+		if(exists $class->{query_iterator}) {
+			if(	($class->{query_iterator}->size > 0 ) &&
+				(defined $class->{query}) &&
+				(ref($class->{query})=~/ARRAY/) ) {
+                		delete($class->{query});
+				};
+			# iterator over result set
+			return RDFStore::Model::Iterator->new(	$class->getNodeFactory, 
+								$class->{query_iterator} );
+		} else {
+			return $class->{Shared}->elements;
+			};
+	} else {
+		# normal iterator over the whole model
+		return RDFStore::Model::Iterator->new(	$class->getNodeFactory, 
+							$class->{rdfstore}->elements );
 		};
 	};
 
-        $_[0]->_tie
-                unless($_[0]->_tied);
- 
-        if(	(defined $_[1]) &&
-                (ref($_[1])) &&
-                ($_[1]->isa("RDFStore::Stanford::Statement")) ) {
-		my ($subject_localname_code,$subject_namespace_code) = map {
-                	$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
-        	my ($predicate_localname_code,$predicate_namespace_code) = map {
-                	$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
-        	my ($object_localname_code,$object_namespace_code,$object_literal_code);
-        	if(     (defined $_[1]->object) &&
-                	($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
-                	($object_localname_code,$object_namespace_code) = map {
-                        	$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
-        	} elsif(defined $_[1]->object) {
-                	$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
-        	};
-        	return ($_[0]->_fetchRDFNode(	$subject_localname_code,
-						$subject_namespace_code,
-						$predicate_localname_code,
-						$predicate_namespace_code,
-						$object_localname_code,
-						$object_namespace_code,
-						$object_literal_code)) ? 1 : 0;
-	} else {
-		return 0;
+sub namespaces {
+	my ($class) = @_;
+
+	my %ns_table=();
+
+	# must scan the whole database of course :-(
+	my $itr = $class->elements;
+        while ( my $p = $itr->each_predicate ) {
+                my $ns_uri = $p->getNamespace;
+
+		next
+			unless(defined $ns_uri);
+
+		$ns_table{ $ns_uri } = 1
+			unless(exists $ns_table{ $ns_uri });
+		};
+
+	return keys %ns_table;
 	};
-};
+
+# tests if the model contains a given statement
+sub contains {
+        return 0
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+                	($_[1]->isa("RDFStore::Statement")) );
+
+        croak "Statement context '".$_[2]."' is not instance of RDFStore::Resource"
+                unless( (not(defined $_[2])) ||
+                                (       (defined $_[2]) &&
+                                        (ref($_[2])) &&
+                                        ($_[2]->isa('RDFStore::Resource')) ) );
+
+	my $context;
+	if(defined $_[2]) {
+		$context = $_[2];
+	} else {
+		$context = $_[1]->context
+			if($_[1]->context);
+		};
+
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		if(exists $_[0]->{query_iterator}) {
+			return 0
+                                if($_[0]->{query_iterator}->size <= 0); #got an empty query
+
+                        # simply use the iterator we got from last query to quickly (??) check whether or not the st_id exists in the rdfstore; efficient, really??
+                        return $_[0]->{query_iterator}->contains( $_[1], undef, undef, $context );
+		} else {
+			return ( $_[0]->find( $_[1]->subject, $_[1]->predicate, $_[1]->object, $context )->elements->size == 1 );
+			};
+		};
+
+	return $_[0]->{rdfstore}->contains( $_[1], undef, undef, $context );
+	};
 
 # Model manipulation: add, remove, find
 #
@@ -344,210 +355,63 @@ sub contains {
 #
 # Adds a new triple to the model
 sub add {
-        my ($class, $subject,$predicate,$object) = @_;
+        my ($class, $subject,$predicate,$object,$context) = @_;
 
-        croak "Subject or Statement ".$subject." is either not instance of RDFStore::Stanford::Statement or RDFStore::Stanford::Resource"
+        croak "Subject or Statement '".$subject."' is either not instance of RDFStore::Statement or RDFStore::Resource"
                 unless( (defined $subject) &&
                         (ref($subject)) &&
-                        (       ($subject->isa('RDFStore::Stanford::Resource')) ||
-                                ($subject->isa('RDFStore::Stanford::Statement')) ) );
-	croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
+                        (       ($subject->isa('RDFStore::Resource')) ||
+                                ($subject->isa('RDFStore::Statement')) ) );
+	croak "Predicate '".$predicate."' is not instance of RDFStore::Resource"
                 unless( (not(defined $predicate)) ||
                         (       (defined $predicate) &&
                                 (ref($predicate)) &&
-                                ($predicate->isa('RDFStore::Stanford::Resource')) &&
-                                ($subject->isa('RDFStore::Stanford::Resource')) ) );
-        croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
+                                ($predicate->isa('RDFStore::Resource')) ) );
+        croak "Object '".$object."' is not instance of RDFStore::RDFNode"
                 unless( (not(defined $object)) ||
-                        ( ( ( (defined $object) &&
+                        ( ( (defined $object) &&
                               (ref($object)) &&
-                              ($object->isa('RDFStore::Stanford::RDFNode'))) ||
+                              ($object->isa('RDFStore::RDFNode'))) ||
                             ( (defined $object) &&
-                              ($object !~ m/^\s+$/)) ) && #should work also for BLOBs
-                          ($subject->isa('RDFStore::Stanford::Resource')) &&
-                          ($predicate->isa('RDFStore::Stanford::Resource')) ) );
+                              ($object !~ m/^\s+$/) ) ) );
+
+        croak "Statement context '".$context."' is not instance of RDFStore::Resource"
+        	unless(	(not(defined $context)) ||
+                        (       (defined $context) &&
+                        	(ref($context)) &&
+                                ($context->isa('RDFStore::Resource')) ) );
 
         if(     (defined $subject) &&
                 (ref($subject)) &&
-                ($subject->isa("RDFStore::Stanford::Statement")) ) {
+                ($subject->isa("RDFStore::Statement")) &&
+		(not(defined $predicate)) &&
+		(not(defined $object)) ) {
+		$context = $subject->context
+			unless(defined $context);
                 ($subject,$predicate,$object) = ($subject->subject, $subject->predicate, $subject->object);
         } elsif(        (defined $object) &&
                         (!(ref($object))) ) {
                         $object = $class->{nodeFactory}->createLiteral($object);
         };
 
-        my ($subject_localname_code,$subject_namespace_code) = map {
-                        $class->_getLookupValue($_); } $subject->hashCode();
+	if(     (exists $class->{Shared}) &&
+                (defined $class->{Shared}) ) {
+		if(exists $class->{query_iterator}) {
+                        # simply use the iterator we got from last query to quickly (??) check whether or not the st_id exists in the rdfstore
+                        # this should save the expensive _copyOnWrite() below eventually
+                        return 0 #is it working also for empty queries???!
+                                if ( $class->{query_iterator}->contains( $subject, $predicate, $object, $context ) );
+                        };
+		# copy across stuff if necessary
+        	$class->_copyOnWrite();
+        	};
 
-        my ($predicate_localname_code,$predicate_namespace_code) = map {
-                        $class->_getLookupValue($_); } $predicate->hashCode();
+	my $status = $_[0]->{rdfstore}->insert( $subject, $predicate, $object, $context );
 
-        my ($object_localname_code,$object_namespace_code,$object_literal_code);
-        if($object->isa("RDFStore::Stanford::Resource")) {
-                ($object_localname_code,$object_namespace_code) = map {
-                        $class->_getLookupValue($_); } $object->hashCode();
-	} else {
-                $object_literal_code = $class->_getLookupValue($object->hashCode());
-        };
+        $class->updateDigest($subject,$predicate,$object,$context); #add context to updateDigest() as well???
 
-	#we do not want want duplicates
-	return
-		if($class->_fetchRDFNode(	$subject_localname_code,
-						$subject_namespace_code,
-						$predicate_localname_code,
-						$predicate_namespace_code,
-						$object_localname_code,
-						$object_namespace_code,
-						$object_literal_code));
-
-	$class->_tie
-                unless($class->_tied);
- 
-	# copy across stuff if necessary
-	$class->_copyOnWrite
-		if(	(exists $class->{Shared}) &&
-                	(defined $class->{Shared}) );
-
-	# store the STATEMENT
-	#
-        # I.e.
-        #
-        # $class->{statements}->{ $st_num*8 } = (
-        #       $subject_localname_code,
-        #       $subject_namespace_code,
-        #       $predicate_localname_code,
-        #       $predicate_namespace_code,
-        #       $object_localname_code,
-        #       $object_namespace_code,
-        #       $object_literal_code
-	#	[,$context]	# id of statement giving context
-        # );
-        #
-	# $class->{namespaces}->{ $predicate_namespace_code } = 'http://dublincore.org/elements/1.1/';
-	#
-	# $class->{resources}->{ $predicate_localname_code } = 'creator';
-	#
-	# $class->{literals}->{ $object_literal_code } = 'webmaster@somewhere.org';
-	#
-	# $class->{Windex}->{ $subject_localname_code } = 76453; # 3D sparse matrix
-	# $class->{Windex}->{ $subject_namespace_code } = 24999; # and so on....
-	
-        # count one more - it must be atomic/fault tolerant
-        my $st_id = $class->{statements_db}->inc('add_counter'); #inc
-
-	#use 8 slots
-        my $bitno=$st_id*8;
- 
-	# store subject LOCALNAME
-        $class->{resources}->{$subject_localname_code} = $subject->getLocalName         #STORE
-               	if(     (defined $subject_localname_code) &&
-                       	(!(exists $class->{resources}->{$subject_localname_code})) );   #EXISTS
-
-	# store subject NAMESPACE
-       	$class->{namespaces}->{$subject_namespace_code} = $subject->getNamespace        #STORE
-               	if(     (defined $subject_namespace_code) &&
-                       	(!(exists $class->{namespaces}->{$subject_namespace_code})) );  #EXISTS
- 
-	# store predicate LOCALNAME
-        $class->{resources}->{$predicate_localname_code} = $predicate->getLocalName       #STORE
-               	if(     (defined $predicate_localname_code) &&
-                       	(!(exists $class->{resources}->{$predicate_localname_code})) );   #EXISTS
-
-	# store predicate NAMESPACE
-       	$class->{namespaces}->{$predicate_namespace_code} = $predicate->getNamespace      #STORE
-               	if(     (defined $predicate_namespace_code) &&
-                       	(!(exists $class->{namespaces}->{$predicate_namespace_code})) );  #EXISTS
- 
-        if($object->isa("RDFStore::Stanford::Resource")) {
-		# store object LOCALNAME
-        	$class->{resources}->{$object_localname_code} = $object->getLocalName        #STORE
-        		if(     (defined $object_localname_code) &&
-               			(!(exists $class->{resources}->{$object_localname_code})) ); #EXISTS
-
-		# store object NAMESPACE
-       		$class->{namespaces}->{$object_namespace_code} = $object->getNamespace         #STORE
-        		if(     (defined $object_namespace_code) &&
-               			(!(exists $class->{namespaces}->{$object_namespace_code})) );  #EXISTS
-	} else {
-                # store LITERAL/BLOB
-                $class->{literals}->{$object_literal_code} = $object->getContent                #STORE (BLOBs also :)
-                        if(     (defined $object_literal_code) &&
-                                (!(exists $class->{literals}->{$object_literal_code})) );       #EXISTS
-
-		#free-text search on literals stuff
-		if(	(!(ref($object->getContent))) &&
-			($object->getContent ne '') &&
-			(	(exists $class->{options}->{FreeText}) &&
-				($class->{options}->{FreeText}==1) ) ) {
-        		my $Windex;
-			foreach my $word (grep !/\s+/, split /\b/m,$object->getContent) { #do not consider white spaces
-				$Windex='';
-				$Windex=(	(exists $class->{options}->{Compression}) &&  
-						($class->{options}->{Compression}==1) ) ?
-					$class->_decode( $class->{Windex}->{$word} ) :
-					$class->{Windex}->{$word} #FETCH
-					if(exists $class->{Windex}->{$word}); #EXISTS
-				vec($Windex,$bitno+6,1)|=1;
-
-				$class->{Windex}->{$word}=(	(exists $class->{options}->{Compression}) &&
-								($class->{options}->{Compression}==1) ) ?
-						$class->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
+	return $status;
 	};
-
-#print STDERR "add) CODES($subject_localname_code,$subject_namespace_code,$predicate_localname_code,$predicate_namespace_code,$object_localname_code,$object_namespace_code,$object_literal_code)\n";
-
-        my $Windex;
-	foreach my $idx ( 	$subject_localname_code, 	#0
-				$subject_namespace_code,	#1
-				$predicate_localname_code,	#2
-				$predicate_namespace_code,	#3
-				$object_localname_code,		#4
-				$object_namespace_code,		#5
-				$object_literal_code ) {	#6
-		if(defined $idx) {
-			$class->{statements}->{$class->_getLookupValue($bitno)} = $idx		# STORE
-                		if(!(exists $class->{statements}->{$class->_getLookupValue($bitno)}));	#EXISTS
-
-			# store WINDEX
-#print STDERR "B) ($st_id/$bitno)-->unpacked='",unpack("b*",$class->_decode( $class->{Windex}->{$idx} )),"'\n";
-
-        		$Windex='';
-			$Windex=(      (exists $class->{options}->{Compression}) &&  
-                                        ($class->{options}->{Compression}==1) ) ?
-					$class->_decode( $class->{Windex}->{$idx} ) :
-					$class->{Windex}->{$idx} #FETCH
-				if(exists $class->{Windex}->{$idx}); #EXISTS
-			vec($Windex,$bitno,1)|=1;
-
-#print STDERR "B1) ($st_id/$bitno)-->unpacked='",unpack("b*",$Windex),"'\n";
-
-			$class->{Windex}->{$idx}=(      (exists $class->{options}->{Compression}) &&  
-                                        		($class->{options}->{Compression}==1) ) ?
-							$class->_encode($Windex) :
-							$Windex; #STORE
-
-#print STDERR "A) ($st_id/$bitno)-->unpacked='",unpack("b*",$class->_decode( $class->{Windex}->{$idx} )),"'\n\n";
-		};
-		$bitno++;
-	};
-
-#print STDERR $st_id,"/",$bitno-1,"\n";
- 
-        if(     (exists $class->{options}->{Sync}) &&
-                (defined $class->{options}->{Sync}) ) {
-                #sync :(
-                $class->{literals_db}->sync();
-                $class->{resources_db}->sync();
-                $class->{namespaces_db}->sync();
-                $class->{statements_db}->sync();
-                $class->{Windex_db}->sync();
-        };
- 
-        $class->updateDigest($subject,$predicate,$object);
-};
 
 sub updateDigest {
 	delete $_[0]->{digest};
@@ -556,398 +420,229 @@ sub updateDigest {
 	#	unless(defined $_[0]->{digest});
 	# see http://nestroy.wi-inf.uni-essen.de/rdf/sum_rdf_api/#K31
 	#my $digest = $_[1]->getDigest();
-      	#RDFStore::Stanford::Digest::Util::xor($_[0]->{digest}->getDigestBytes(),$digest->getDigestBytes());
-};
+      	#RDFStore::Util::Digest::xor($_[0]->getDigest(),$digest->getDigest());
+	};
 
 # Removes the triple from the model
 # NOTE: it is not really safe here - we might need to lock all DBs, del statement, unlock and return (TXP) :)
 sub remove {
-        croak "Statement ".$_[1]." is not instance of RDFStore::Stanford::Statement"
+        croak "Statement '".$_[1]."' is not instance of RDFStore::Statement"
                 unless( (defined $_[1]) &&
                         (ref($_[1])) &&
-                        ($_[1]->isa('RDFStore::Stanford::Statement')) );
- 
-        $_[0]->_tie
-                unless($_[0]->_tied);
- 
+                        ($_[1]->isa('RDFStore::Statement')) );
+
+        croak "Statement context '".$_[2]."' is not instance of RDFStore::Resource"
+                unless( (not(defined $_[2])) ||
+                                (       (defined $_[2]) &&
+                                        (ref($_[2])) &&
+                                        ($_[2]->isa('RDFStore::Resource')) ) );
+
+	my $context;
+        if(defined $_[2]) {
+                $context = $_[2];
+        } else {
+                $context = $_[1]->context
+			if($_[1]->context);
+                };
+
 	# copy across stuff if necessary
-	$_[0]->_copyOnWrite
-		if(	(exists $_[0]->{Shared}) &&
+        $_[0]->_copyOnWrite()
+		if(     (exists $_[0]->{Shared}) &&
                 	(defined $_[0]->{Shared}) );
-
-	# remove the STATEMENT
-	#
-	# I.e.
-	#	1) find the statement
-	#	2) if the statement is *unique* remove it
-	#
-	#	NOTE: unique means that no other statements have *exaclty* the same properties
-	#
-
-	my ($subject_localname_code,$subject_namespace_code) = map {
-               	$_[0]->_getLookupValue($_); } $_[1]->subject->hashCode();
-        my ($predicate_localname_code,$predicate_namespace_code) = map {
-               	$_[0]->_getLookupValue($_); } $_[1]->predicate->hashCode();
-        my ($object_localname_code,$object_namespace_code,$object_literal_code);
-        if(     (defined $_[1]->object) &&
-               	($_[1]->object->isa("RDFStore::Stanford::Resource")) ) {
-               	($object_localname_code,$object_namespace_code) = map {
-                       	$_[0]->_getLookupValue($_); } $_[1]->object->hashCode();
-        } elsif(defined $_[1]->object) {
-               	$object_literal_code = $_[0]->_getLookupValue($_[1]->object->hashCode());
-        };
-	my($st_id)=$_[0]->_fetchRDFNode(	$subject_localname_code,
-						$subject_namespace_code,
-						$predicate_localname_code,
-						$predicate_namespace_code,
-						$object_localname_code,
-						$object_namespace_code,
-						$object_literal_code);
-	if(defined $st_id) {
-#print STDERR "Removing ",$_[1]->toString,"($st_id)....";
-
-		#removed one statement
-		$_[0]->{statements_db}->inc('remove_counter'); #inc
-
-		#remove  subject localname
-		my $bitno=$st_id*8;
-		my $id=$_[0]->_getLookupValue($bitno);
-		my $oid;
-        	my $Windex;
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode($oid))>1) {
-					delete($_[0]->{resources}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&  
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  subject namespace
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode(undef,$oid))>1) {
-					delete($_[0]->{namespaces}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  predicate localname
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode(undef,undef,$oid))>1) {
-					delete($_[0]->{resources}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  predicate namespace
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,$oid))>1) {
-					delete($_[0]->{namespaces}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  object localname
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,$oid))>1) {
-					delete($_[0]->{resources}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  object namespace
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,$oid))>1) {
-					delete($_[0]->{namespaces}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero the right bit
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-			};
-		};
-		#remove  object literal
-		$id=$_[0]->_getLookupValue(++$bitno);
-		if($oid = $_[0]->{statements}->{$id}) { #FETCH
-			delete($_[0]->{statements}->{$id}); #DELETE
-			if(defined $oid) {
-				my $content;
-				unless(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,undef,$oid))>1) {
-					$content=$_[0]->{literals}->{$oid} #additional FETCH
-						if(	(exists $_[0]->{options}->{FreeText}) &&
-                                			($_[0]->{options}->{FreeText}==1) );
-					delete($_[0]->{literals}->{$oid}); #DELETE
-				};
-
-        			$Windex='';
-				$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-					$_[0]->_decode( $_[0]->{Windex}->{$oid} ) :
-					$_[0]->{Windex}->{$oid} #FETCH
-					if(exists $_[0]->{Windex}->{$oid}); #EXISTS
-				vec($Windex,$bitno,1)&=0; #reset to zero
-
-				$_[0]->{Windex}->{$oid}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-						$_[0]->_encode($Windex) :
-						$Windex; #STORE
-
-				#remove free-text search stuff for literals
-                		if(     (defined $content) &&
-					(!(ref($content))) &&
-					($content ne '') &&
-					(     (exists $_[0]->{options}->{FreeText}) &&
-                                                        ($_[0]->{options}->{FreeText}==1) ) ) {
-                        		foreach my $word (grep !/\s+/, split /\b/m,$content) { #do not consider white spaces
-						if(scalar($_[0]->_fetchRDFNode(undef,undef,undef,undef,undef,undef,undef,$word))>1) {
-                                			$Windex='';
-                                			$Windex=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-                                        			$_[0]->_decode( $_[0]->{Windex}->{$word} ) :
-                                        			$_[0]->{Windex}->{$word} #FETCH
-                                        			if(exists $_[0]->{Windex}->{$word}); #EXISTS
-                                			vec($Windex,$bitno,1)&=0; #reset to zero
-
-                                			$_[0]->{Windex}->{$word}=(      (exists $_[0]->{options}->{Compression}) &&
-                                        ($_[0]->{options}->{Compression}==1) ) ?
-                                                		$_[0]->_encode($Windex) :
-                                                		$Windex; #STORE
-						} else {
-							delete($_[0]->{Windex}->{$word}); #DELETE
-						};
-                        		};
-                		};
-			};
-		};
-
-#print STDERR "DONE!\n";
-	};
-	
-	if(     (exists $_[0]->{options}->{Sync}) &&
-                (defined $_[0]->{options}->{Sync}) ) {
-                #sync :(
-                $_[0]->{literals_db}->sync();
-                $_[0]->{resources_db}->sync();
-                $_[0]->{namespaces_db}->sync();
-                $_[0]->{statements_db}->sync();
-                $_[0]->{Windex_db}->sync();
-        };
  
-        $_[0]->updateDigest($_[1]);
-};
+	my $status = $_[0]->{rdfstore}->remove( $_[1], undef, undef, $context );
+
+        $_[0]->updateDigest($_[1]->subject, $_[1]->predicate, $_[1]->object, $context);
+
+	return $status;
+	};
 
 sub isMutable {
 	return 1;
-};
+	};
 
 # General method to search for triples.
 # null input for any parameter will match anything.
-# Example: $result = $m->find( undef, $RDF::type, new RDFStore::Resource("http://...#MyClass"), [word] );
+# Example: $result = $m->find( undef, $RDFStore::Vocabulary::RDF::type, new RDFStore::Resource("http://...#MyClass"), [ context, words_operator, @words ] );
 # finds all instances in the model
 sub find {
-        my ($class,$subject,$predicate,$object,$object_literal_word) = @_;
+        my ($class) = shift;
+        my ($subject,$predicate,$object,$context,$words_operator,@words) = @_;
 
-        croak "Subject ".$subject." is not instance of RDFStore::Stanford::Resource"
+        croak "Subject '".$subject."' is not instance of RDFStore::Resource"
                 unless(	(not(defined $subject)) ||
                         (       (defined $subject) &&
                                 (ref($subject)) &&
-				($subject->isa('RDFStore::Stanford::Resource')) ) );
-        croak "Predicate ".$predicate." is not instance of RDFStore::Stanford::Resource"
+				($subject->isa('RDFStore::Resource')) ) );
+        croak "Predicate '".$predicate."' is not instance of RDFStore::Resource"
                 unless( (not(defined $predicate)) ||
                                 (       (defined $predicate) &&
                                         (ref($predicate)) &&
-                                        ($predicate->isa('RDFStore::Stanford::Resource')) ) );
-        croak "Object ".$object." is not instance of RDFStore::Stanford::RDFNode"
+                                        ($predicate->isa('RDFStore::Resource')) ) );
+        croak "Object '".$object."' is not instance of RDFStore::RDFNode"
                 unless( (not(defined $object)) ||
                                 (       (defined $object) &&
                                         (ref($object)) &&
-                                        ($object->isa('RDFStore::Stanford::RDFNode')) ) );
+                                        ($object->isa('RDFStore::RDFNode')) ) );
 
-	return
-		if(	(defined $object) &&
-			(defined $object_literal_word) &&
-			(     (exists $class->{options}->{FreeText}) &&
-                              ($class->{options}->{FreeText}==1) ) );
+        croak "Statement context '".$context."' is not instance of RDFStore::Resource"
+                unless( (not(defined $context)) ||
+                                (       (defined $context) &&
+                                        (ref($context)) &&
+                                        ($context->isa('RDFStore::Resource')) ) );
 
 	# e.g. $class->find($subject,$predicate,$object)->find(....) and so on
-	# NOTE: this could be much improved avoid DB operations using shared_ids of properties.....
-	if(	(exists $class->{Shared}) &&
-		(defined $class->{Shared}) ) {
-		$class->{Shared}->{sharing_query_model_statement_ids}=$class->{query_model_statement_ids}
-			if(	(exists $class->{query_model_statement_ids}) &&
-				($#{$class->{query_model_statement_ids}}>=0) );
-		return $class->{Shared}->find($subject,$predicate,$object,$object_literal_word);
-	};
+	# NOTE: we are trying to improve this by avoiding DB operations using shared_ids of statements/properties.....
+	if(     (exists $class->{Shared}) &&
+                (defined $class->{Shared}) ) {
+                $class->{Shared}->{sharing_query_iterator} = $class->{query_iterator}->duplicate
+                        if(exists $class->{query_iterator});
+                return $class->{Shared}->find($subject,$predicate,$object,$context,$words_operator,@words);
+        };
 
-	$class->_tie
-                unless($class->_tied);
+	my @query = @_;
+	$class->{query} = \@query;
 
         # we have the same problem like in Pen - a result set must be a model/collection :-)
         my $res = $class->create(); #EMPTY MODEL
 
-	# we keep numbers of shared statements for queries :)
-	# NOTE: it is much better to keep in-memory just IDs of queries instead of add() full-blown statements
-	# it might be that a query model module or cache one would be preferred here in the future.....
-        $res->{query_model_statement_ids}=[];
-
-        return $res
-		if($class->isEmpty());
-
-	if(     (exists $class->{options}->{FreeText}) &&
-                              ($class->{options}->{FreeText}==1) ) {
-        	return $class->duplicate()
-                	if(     (not(defined $subject)) &&
-                        	(not(defined $predicate)) &&
-                        	(not(defined $object)) &&
-                        	(not(defined $object_literal_word)) );
-	} else {
-        	return $class->duplicate()
-                	if(     (not(defined $subject)) &&
-                        	(not(defined $predicate)) &&
-                        	(not(defined $object)) );
-	};
+	#skip 2 FETCHES for the moment - efficency
+        #return $res
+	#	if($class->{rdfstore}->is_empty());
 
 	#share IDs till first write operation such as add() or remove() on query result model
 	# NOTE: sharing avoid add() full-blown statements to the result model
 	$res->{Shared}=$class;
 
-	my ($subject_localname_code,$subject_namespace_code) = map {
-                        $class->_getLookupValue($_); } $subject->hashCode()
-		if(defined $subject);
-        my ($predicate_localname_code,$predicate_namespace_code) = map {
-                        $class->_getLookupValue($_); } $predicate->hashCode()
-		if(defined $predicate);
-        my ($object_localname_code,$object_namespace_code,$object_literal_code);
-        if(     (defined $object) &&
-        	($object->isa("RDFStore::Stanford::Resource")) ) {
-                ($object_localname_code,$object_namespace_code) = map {
-                                $class->_getLookupValue($_); } $object->hashCode();
-        } elsif(defined $object) {
-        	$object_literal_code = $class->_getLookupValue($object->hashCode());
-        };
+	$res->setContext( $context ) #correct ???!!???
+		if(defined $context);
 
-        # fetch results keeping track of IDs
-	my(@ids);
-        map {
-                push @ids,$_;
-        } $class->_fetchRDFNode(	$subject_localname_code,
-					$subject_namespace_code,
-					$predicate_localname_code,
-					$predicate_namespace_code,
-					$object_localname_code,
-					$object_namespace_code,
-					$object_literal_code,
-					$object_literal_word);
+        if(     (not(defined $subject)) &&
+        	(not(defined $predicate)) &&
+                (not(defined $object)) &&
+                (not(defined $context)) &&
+		($#words < 0) ) {
+		# does NOT work for shared models yet!!!! - note: the duplicate() above could have fixed it :)
+		if ( exists $class->{sharing_query_iterator}) {
+                	$res->{query_iterator} = $class->{sharing_query_iterator};
+                	delete $class->{sharing_query_iterator};
 
-	if(exists $class->{sharing_query_model_statement_ids}) {
-		map {
-			my $a=$_;
-			push @{$res->{query_model_statement_ids}}, $a
-				if(grep /^$a$/,@ids);
-			} @{$class->{sharing_query_model_statement_ids}};
-		delete($class->{sharing_query_model_statement_ids});
-	} else {
-		push @{$res->{query_model_statement_ids}},@ids;
-	};
+			return $res;
+		} else {
+			my $d = $class->duplicate();
+			#$d->setContext( $context ) #correct???!??
+			#	if(defined $context); #impossible
+			return $d;
+			};
+		};
+
+	my $search_type=0; #default triple-pattern search
+	#                       0 1 2 3 4 5 6 7 8 9 0 1 2 3
+        #                       s s p p o o c c l l d d w w
+        my @operators_and_nums=(0,0,0,0,0,0,0,0,0,0,0,0,0,0); #all non-words operators are set to 0=OR - will need 1=AND for real RDQL query
+
+	my @qq=();
+	if($subject) {
+		$operators_and_nums[1]++;
+		push @qq, $subject;
+		};
+	if($predicate) {
+		$operators_and_nums[3]++;
+		push @qq, $predicate;
+		};
+	if($object) {
+		$operators_and_nums[5]++;
+		push @qq, $object;
+
+		#still need to add xml:lang and rdf:datatype for passed object here...
+		};
+	if($context) {
+		$operators_and_nums[7]++;
+		push @qq, $context;
+		};
+	$operators_and_nums[12] = (	(defined $words_operator) &&
+					($words_operator =~ /(and|&|1)/i) ) ? 1 :
+					(       (defined $words_operator) &&
+						($words_operator =~ /(not|~|2)/i) ) ? 2 : 0;
+	map {
+		$operators_and_nums[13]++;
+		push @qq, $_;
+		} @words;
+	my $iterator = $class->{rdfstore}->search( $search_type, @operators_and_nums, @qq );
+
+	if ( exists $class->{sharing_query_iterator}) {
+                # intersect/diff the two iterators
+		$res->{query_iterator} = $class->{sharing_query_iterator}->intersect( $iterator );
+                delete $class->{sharing_query_iterator};
+        } else {
+                $res->{query_iterator} = $iterator;
+                };
 
         return $res;
-};
+	};
+
+sub fetch_object {
+        my ($class,$resource,$context) = @_;
+
+        croak "Resource '".$resource."' is not instance of RDFStore::Resource"
+                unless(       (defined $resource) &&
+                              (ref($resource)) &&
+			      ($resource->isa('RDFStore::Resource')) );
+
+        croak "Context '".$context."' is not instance of RDFStore::Resource"
+                unless( (not(defined $context)) ||
+                                (       (defined $context) &&
+                                        (ref($context)) &&
+                                        ($context->isa('RDFStore::Resource')) ) );
+
+	return
+		if( $resource->isbNode );
+
+	# we have the same problem like in Pen - a result set must be a model/collection :-)
+        my $res = $class->create(); #EMPTY MODEL
+
+        #share IDs till first write operation such as add() or remove() on query result model
+        # NOTE: sharing avoid add() full-blown statements to the result model
+        $res->{Shared}=$class;
+
+        $res->setContext( $context ) #correct ???!!???
+                if(defined $context);
+
+#print "FETCH --> ".$resource->toString."\n";
+        $res->{query_iterator} = $class->{rdfstore}->fetch_object( ($resource->isa("RDFStore::Object")) ? $resource->{'rdf_object'} : $resource, $context );
+
+	return $res;
+	};
+
+sub getResource {
+        my ($class,$resource) = @_;
+
+	my $object = new RDFStore::Object( $resource );
+	$object->load( $class->fetch_object( $class->getNodeFactory->createResource($resource) ) );
+
+	return $object; #return a new in-memory RDF object (and relative model)
+	};
 
 # clone the model - So due that copy is expensive we use sharing :)
 sub duplicate {
 	my ($class) = @_;
+
+	return $class->{Shared}->duplicate
+		if(     (exists $class->{Shared}) &&
+                	(defined $class->{Shared}) );
 
         my $new = $class->create();
 
         # return a model that shares store and lookup with this model
         # delegate read operations till first write operation such as add() or remove()
 	# NOTE: sharing avoid to copy right the way the whole original model that could be very large :)
+	#       This trick allows to chain nicely find() methods
         $new->{Shared} = $class;
 
+	# set default context if any was set
+	my $sg = $class->getContext;
+	$new->setContext( $sg )
+        	if(defined $sg);
         return $new;
 };
 
@@ -956,47 +651,34 @@ sub create {
         my($class) = shift;
 
         my $self = ref($class);
-        my $new = $self->new();
-
-	$new->{options}->{Compression}=$class->{options}->{Compression}
-		if(exists $class->{options}->{Compression});
-	$new->{options}->{Freetext}=$class->{options}->{FreeText}
-		if(exists $class->{options}->{FreeText});
+        my $new = $self->new(); #we also get empty RDFStore(3)
 
         return $new;
-};
+	};
 
 sub getNodeFactory {
         return $_[0]->{nodeFactory};
-};
+	};
 
 sub getLabel {
         return $_[0]->getURI;
-};
-
-sub getDigest {
-        return $_[0];
-};       
+	};
 
 sub getURI {
         if($_[0]->isEmpty()) {
                 return $_[0]->{nodeFactory}->createUniqueResource()->toString();
         } else {
-                return "uuid:rdf:".
-                                $_[0]->getDigestAlgorithm ."-".
-                                RDFStore::Stanford::Digest::Util::toHexString( $_[0]->getDigest() );
-        };
-};
+                return "urn:rdf:".
+				&RDFStore::Util::Digest::getDigestAlgorithm()."-".
+                        	unpack("H*", $_[0]->getDigest() );
+        	};
+	};
 
-sub getDigestAlgorithm {
-        return &RDFStore::Stanford::Digest::Util::getDigestAlgorithm();
-}; 
-
-sub getDigestBytes {
+sub getDigest {
         unless ( defined $_[0]->{digest} ) {
                 sub digest_sorter {
-                        my @a1 = unpack "c*", ${ $a->getDigest()->getDigestBytes() };
-                        my @b1 = unpack "c*", ${ $b->getDigest()->getDigestBytes() };
+                        my @a1 = unpack "c*",$a->getDigest();
+                        my @b1 = unpack "c*",$b->getDigest();
                         my $i;
                         for ($i=0; $i < $#a1 +1; $i++) {
                                 return $a1[$i] - $b1[$i] unless ord $a1[$i] == ord $b1[$i];
@@ -1005,428 +687,682 @@ sub getDigestBytes {
                 };
                 my $t;
                 my $digest_bytes;
-                for  $t ( sort digest_sorter @{$_[0]->elements} ){ #this still fetches all statements in-memory :(
-                        $digest_bytes .= $ { $t->getDigest()->getDigestBytes() };
-                };
-                $_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest($_[0]->getDigestAlgorithm, $digest_bytes);
-        };
-        return $_[0]->{digest}->getDigestBytes();
-};
+		my ($el) = $_[0]->elements;
+		my @sts = ();
+		my $ss;
+		for (	$ss = $el->first;
+			$el->hasnext;
+			$ss = $el->next ) {
+			push @sts, $ss;
+			};
+                for  $t ( sort digest_sorter @sts ){ #this still fetches all statements in-memory :(
+                        $digest_bytes .= $t->getDigest();
+                	};
+                $_[0]->{digest} = RDFStore::Util::Digest::computeDigest($digest_bytes);
+        	};
+        return $_[0]->{digest};
+	};
 
-#serialise model to strawman syntax - see XML::Parser::OpenHealth(3)
-# it could return a kind of tied filehandle/stream :)
-sub toStrawmanRDF {
+#set operations on RDFStore::Model using RDFStore::Iterator (mostly efficient in-memory)
+sub intersect {
+	my ($class,$other) = @_;
 
-	$_[0]->_tie
-                unless($_[0]->_tied);
+	return
+		unless($other);
 
-	# here we should use RDFStore::Stanford::Vocabulary::RDF definitions....
-	my $rdf= '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE rdf:RDF [ <!ENTITY rdf "http://www.w3.org/1999/02/22-rdf-syntax-ns#"> ]><rdf:RDF xmlns:rdf="&rdf;">';
-	$rdf .= "\n";
+	croak "Model '".$other."' is not instance of RDFStore::Model"
+		unless( (defined $other) && (ref($other)) &&
+			($other->isa('RDFStore::Model')) );
 
-	# when here we do not have an index set :(
-	my($elements)=$_[0]->elements;
-	for my $ii ( 0..$#{$elements} ) {
-		my $st=$elements->[$ii]; #FETCH one by one
+	croak "Models can not be intersected"
+		unless(	( $class->{Shared} == $class->{Shared} ) ||
+			( $class->{rdfstore} == $other->{rdfstore} ) );
 
-		$rdf .= '<rdf:Statement rdf:ID="'.$st->getURI().'">'."\n";
+        my $res = $class->create(); #EMPTY MODEL in-memory
 
-		$rdf .= "\t".'<rdf:subject rdf:resource="'.$st->subject()->toString.'" />'."\n";
-		$rdf .= "\t".'<rdf:predicate rdf:resource="'.$st->predicate()->toString.'" />'."\n";
-		my $object = $st->object();
-		# binary data is a still a problem. We might use MIME::Base64 or URI::data
-		if( (defined $object) && (ref($object)) && ($object->isa("RDFStore::Stanford::Literal")) ) {
-			my $s = $st->object()->toString;
-			$rdf .= "\t".'<rdf:object'.
-					( ($s =~ /[\&\<\>]/) ? ' xml:space="preserve"><![CDATA['.$s.']]>' : '>'.$s ).'</rdf:object>'."\n";
-		} else {
-			$rdf .= "\t".'<rdf:object rdf:resource="'.$st->object()->toString.'" />'."\n";
+        $res->{Shared} = $class; # share storage (the other is sharing it anyway by definition :-)
+
+	my $iter = $class->elements->intersect( $other->elements ); # that easy :)
+
+	return
+		unless($iter);
+
+	$res->{query_iterator} = $iter->{iterator};
+
+	# set default context if any was set
+	my $sg = $class->getContext;
+	$res->setContext( $sg )
+        	if(defined $sg);
+
+        return $res;
+	};
+
+sub subtract {
+	my ($class,$other) = @_;
+
+	return
+		unless($other);
+
+	croak "Model '".$other."' is not instance of RDFStore::Model"
+		unless( (defined $other) && (ref($other)) &&
+			($other->isa('RDFStore::Model')) );
+
+	croak "Models can not be subtracted"
+		unless(	( $class->{Shared} == $class->{Shared} ) ||
+			( $class->{rdfstore} == $other->{rdfstore} ) );
+
+	my $res = $class->create(); #EMPTY MODEL in-memory
+
+        $res->{Shared} = $class; # share storage (the other is sharing it anyway by definition :-)
+
+        my $iter = $class->elements->subtract( $other->elements );
+
+	return
+		unless($iter);
+
+	$res->{query_iterator} = $iter->{iterator};
+
+        # set default context if any was set
+        my $sg = $class->getContext;
+        $res->setContext( $sg )
+                if(defined $sg);
+
+        return $res;
+	};
+
+sub unite {
+	my ($class,$other) = @_;
+
+	return
+		unless($other);
+
+	croak "Model '".$other."' is not instance of RDFStore::Model"
+		unless( (defined $other) && (ref($other)) &&
+			($other->isa('RDFStore::Model')) );
+
+	croak "Models can not be united"
+		unless(	( $class->{Shared} == $class->{Shared} ) ||
+			( $class->{rdfstore} == $other->{rdfstore} ) );
+
+	my $res = $class->create(); #EMPTY MODEL in-memory
+
+        $res->{Shared} = $class; # share storage (the other is sharing it anyway by definition :-)
+
+        my $iter = $class->elements->unite( $other->elements );
+
+	return
+		unless($iter);
+
+	$res->{query_iterator} = $iter->{iterator};
+
+        # set default context if any was set
+        my $sg = $class->getContext;
+        $res->setContext( $sg )
+                if(defined $sg);
+
+        return $res;
+	};
+
+sub complement {
+	my ($class) = @_;
+
+	my $res = $class->create(); #EMPTY MODEL in-memory
+
+        $res->{Shared} = $class; # share storage (the other is sharing it anyway by definition :-)
+
+        my $iter = $class->elements->complement;
+
+	return
+		unless($iter);
+
+	$res->{query_iterator} = $iter->{iterator};
+
+        # set default context if any was set
+        my $sg = $class->getContext;
+        $res->setContext( $sg )
+                if(defined $sg);
+
+        return $res;
+	};
+
+sub exor {
+	my ($class,$other) = @_;
+
+	return
+		unless($other);
+
+	croak "Model '".$other."' is not instance of RDFStore::Model"
+		unless( (defined $other) && (ref($other)) &&
+			($other->isa('RDFStore::Model')) );
+
+	croak "EXOR can not be performed between the two given models"
+		unless(	( $class->{Shared} == $class->{Shared} ) ||
+			( $class->{rdfstore} == $other->{rdfstore} ) );
+
+	my $res = $class->create(); #EMPTY MODEL in-memory
+
+        $res->{Shared} = $class; # share storage (the other is sharing it anyway by definition :-)
+
+        my $iter = $class->elements->exor( $other->elements ); # that easy :)
+
+	return
+		unless($iter);
+
+	$res->{query_iterator} = $iter->{iterator};
+
+        # set default context if any was set
+        my $sg = $class->getContext;
+        $res->setContext( $sg )
+                if(defined $sg);
+
+        return $res;
+	};
+
+#serialize the model/graph as string or to a filehandle using a specific syntax ("RDF/XML", "N-Triples")
+sub serialize {
+	my ($class, $fh, $syntax, $namespaces, $base ) = @_;
+
+	my $serializer;
+	if(	(! $syntax ) ||
+		( $syntax =~ m#RDF/XML#i) ) {
+		$serializer = new RDFStore::Serializer::RDFXML;
+	} elsif( $syntax =~ m/N-Triples/i) {
+		$serializer = new RDFStore::Serializer::NTriples;
+	} else {
+		croak "Unknown serialization syntax '$syntax'";
 		};
 
-		$rdf .= '</rdf:Statement>'."\n";
-       	};
-	$rdf .= '</rdf:RDF>';
+	return
+		unless($serializer);
 
-	return $rdf;
+	return $serializer->write( $class, $fh, $namespaces, $base );
 };
 
+sub getSerializer {
+	my ($class) = shift;
 
-# Storage related part
+	$class->getWriter(@_);
+	};
 
-# copy shared statements across
+sub getWriter {
+	my ($class, $syntax) = @_;
+
+	my $serializer;
+	if(	(! $syntax ) ||
+		( $syntax =~ m#RDF/XML#i) ) {
+		$serializer = new RDFStore::Serializer::RDFXML;
+	} elsif( $syntax =~ m/N-Triples/i) {
+		$serializer = new RDFStore::Serializer::NTriples;
+	} else {
+		croak "Unknown serialization syntax '$syntax'";
+		};
+
+	$serializer->{'model'} = $class; #not sure is correct - perhaps we really need to spell it out in write() method
+
+	return $serializer;
+	};
+
+sub getParser {
+	my ($class) = shift;
+
+	$class->getReader(@_);
+	};
+
+sub getReader {
+	my ($class, $syntax) = @_;
+
+	$class->{'GenidNumber'} = 0
+		unless(exists $class->{'GenidNumber'});
+
+	my $parser;
+	if(	(! $syntax ) ||
+		( $syntax =~ m#RDF/XML#i) ) {
+		$parser = new RDFStore::Parser::SiRPAC(
+					ErrorContext => 3,
+					Style => 'RDFStore::Parser::Styles::RDFStore::Model',
+					NodeFactory => $class->getNodeFactory,
+					Source  => ($class->getSourceURI ) ? $class->getSourceURI : undef,
+					GenidNumber => $class->{'GenidNumber'},
+					'store' => { 'options' => { 'sourceModel' => $class } } );
+	} elsif( $syntax =~ m/N-Triples/i) {
+		$parser = new RDFStore::Parser::NTriples(
+					ErrorContext => 3,
+					Style => 'RDFStore::Parser::Styles::RDFStore::Model',
+					NodeFactory => $class->getNodeFactory,
+					Source  => ($class->getSourceURI ) ? $class->getSourceURI : undef,
+					GenidNumber => $class->{'GenidNumber'},
+					'store' => { 'options' => { 'sourceModel' => $class } } );
+	} else {
+		croak "Unknown RDF syntax '$syntax'";
+		};
+
+	return $parser;
+	};
+
+# Copy shared statements across; we do not set any context for them here bacause the add() below will do it eventually using the default context. Shared/virtual models are there for efficiency 
+# only and can be only generated by a find() or duplicate(); in the former case the context eventually is the context of the query while in the latter is the contexnt of the model (default one).
+# Those two other methods are setting/copying the right default context if necessary
 sub _copyOnWrite {
 	my($class) = @_;
  
 	return
         	unless( (exists $class->{Shared}) &&
                 	(defined $class->{Shared}) );
- 
-	my($shares)=$class->{Shared}->elements(	(	(exists $class->{query_model_statement_ids}) &&
-							($#{$class->{query_model_statement_ids}}>=0) ) ? 
-								@{$class->{query_model_statement_ids}} : () );
 
-	#forget about being a query model if necessary :)
-	delete($class->{query_model_statement_ids})
-		if(exists $class->{query_model_statement_ids});
+#print "Copying stuff across:\n";
+                
+        my ($shares) = $class->elements;
 
-	#break the sharing
+        #forget about being a query model if necessary :)
+        delete($class->{query});
+        if(exists $class->{query_iterator}) {
+		delete($class->{query_iterator});
+		};
+
+        #break the sharing
         delete($class->{Shared});
 
-        #XXXX it could be really expensive in-memory consumage and CPU time!!!
-	for my $ii (0..$#{$shares}) {
-		$class->add($shares->[$ii]);
-	};
-};
-                                
+	my $ss;
+	for (	$ss = $shares->first;
+		$shares->hasnext;
+		$ss = $shares->next ) {
+		#print "\tcopying('".$ss->toString."')\n";
+                $class->add($ss); # what about context here in the cross-copy???
+        	};
 
-# The following two functions come from an algorithm developed by Dirk Willem van Guilk and Nick Hibma called Windex
-#
-# NOTE: I am aware of that the following should be written in C :)
-#
-# Simple RLE encoder/decoder
-# token byte
-#      bit     value   meaning
-#      0..4    ...     lenght of run (len)
-#      5-6     00      len is between 0 .. 31, no other bytes
-#              10      len is continued in next byte, next is LSB (short int)
-#              01      len is continued in next 3 bytes (long int)
-#                         * first is upper nibble of MSB
-#                         * next is lower nibble of MSB
-#                         * next+1 is upper nibble of LSB
-#                         * next+2 is lower nibble of LSB
-#              11      len is continued in next 7 bytes (64 bit int, not implemented yet...)
-#      7       set     run of len bytes set to 0
-#              unset   No run, next len bytes are to be copied
-#                      as-is.
-#
-
-# read a string and returns a RLE encoded version of it
-sub _encode {
-        my ($class,$buff) = @_;
- 
-	return
-		unless(	(defined $buff) &&
-			($buff ne '') );
- 
-        my ($out, $comp, $len, $l);
-        $out='';
-        $comp=0;
-        my $insize=length($buff);
-        my $i=0;
-        my $j=0;
-        for($i=0,$j=0; $i<$insize; ) {
-		#found that using regex below is much faster. But if C code the for is probably better...
-                if(     (vec($buff,$i,8)==0) &&
-                        ($i+1<$insize) &&
-                        (0==vec($buff,$i+1,8)) ) {
-                        for(    $len=2;
-                                        ($len+$i<$insize) &&
-                                        (0==vec($buff,$i+$len,8)) &&
-                                        ($len < 536870912); #up to 32*256*256*256
-                                $len++) {};
-                        $comp=1;
-                } else {
-                        for(    $len=1;
-                                        ($len+$i<$insize) &&
-                                        (       (vec($buff,$i+$len,8)) ||
-                                                (vec($buff,$i+$len-1,8)) ) &&
-                                        ($len < 536870912);
-                                $len++) {};
-                        $len--
-                                if(     ($len+$i<$insize) &&
-                                        ($len < 536870912) );
-                        $comp=0;
-                };
-                $l=$j;
-                if($len>8191) {
-                        vec($out,$l,8) = 64 + (($len>>24) & 31);
-                        vec($out,$l+1,8) = ($len>>16) & 0xffff;
-                        vec($out,$l+2,8) = ($len>>8) & 0xffff;
-                        vec($out,$l+3,8) = $len & 0xffff;
-                        $j+=3;
-                } elsif($len>31) {
-                        vec($out,$l,8) = 32 + (($len>>8) & 31);
-                        vec($out,$l+1,8) = $len & 0xff;
-                        $j++;
-                } else {
-                        vec($out,$l,8) = $len & 31;
-                };
-                $j++;
-		if($comp) {
-                        vec($out,$l,8) |= 128;
-                } else {
-                        if($len==1) {
-                                vec($out,$j,8) = vec($buff,$i,8);
-                        } else {
-                                for(my $ii=0;$ii<$len; $ii++) {
-                                        vec($out,$j+$ii,8) = vec($buff,$i+$ii,8);
-                                };
-                        };
-                        $j+=$len;
-                }; # non-compressed else
-                $i+=$len; # hop on for the next ones...
-        };
-        #return $out up to $j
- 
-        return $out;
+#print "\nDONE!\n";
 };
 
-# read a RLE encoded string and returns a decompressed version of it
-sub _decode {
-        my ($class,$buff) = @_;
-
-	return
-		unless(	(defined $buff) &&
-			($buff ne '') );
-
-        my ($out, $c, $len);
-        $out='';
- 
-        my $insize=length($buff);
-        my $i=0;
-        my $j=0;
-        for($i=0,$j=0; $i<$insize; ) {
-                # work out run length
-                $c = vec($buff,$i,8);
-                last
-                        unless($c); #no compress, no length
-
-                if( $c & 64 ) {
-                	$len = $c & 63;
-			for (1..3) {
-                		$len=($len<<8) + vec($buff,++$i,8);
-			};
-		} else {
-                	$len = $c & 31;
-                	$len=($len<<8) + vec($buff,++$i,8)
-                		if( $c & 32 );
-		};
-
-                if($len==0) {
-                        warn "RDFStore::Model::_decode: Bug RLE len=0\n";
-                        last;
-		};
-                $i++;
-                if($c & 128) {
-                        vec($out,$j,8) = (0) x $len;
-                } else {
-                        for(my $ii=0;$ii<$len; $ii++) {
-                                vec($out,$j+$ii,8) = vec($buff,$i+$ii,8);
-                        };
-                        $i+=$len;
-                };
-                $j+=$len;
-        };
-        #return $out up to $j
- 
-        return $out;
-};
-
-sub _getLookupValue {
-        my ($class) = shift;
-
-        return
-                unless(defined $_[0]);
-
-        return pack("i*",$_[0]);
-};
-
-sub _getValueFromLookup {
-        my ($class) = shift;
-
-        return
-                unless(defined $_[0]);
-
-        return unpack("i*",$_[0]);
-};
-
-# return a list of statement IDs for a given criteria. The statement could be *unique*
-sub _fetchRDFNode {
-        my($class,	$subject_localname,
-			$subject_namespace,
-			$predicate_localname,
-			$predicate_namespace,
-			$object_localname,
-			$object_namespace,
-			$object_literal,
-			$object_literal_word) = @_;
-
-	return
-		if(	(     (exists $class->{options}->{FreeText}) &&
-                              ($class->{options}->{FreeText}==1) ) &&
-			(defined $object_literal) &&
-			(defined $object_literal_word) );
-
-	$object_literal=$object_literal_word
-		if(defined $object_literal_word);
-
-#print STDERR "_fetchRDFNode - ",((caller)[2]),"\n";
-
-        my $Windex='';
-	my $bitno=0;
-	my $mask='';
-	foreach my $idx ( 	$subject_localname, 	#0
-				$subject_namespace,	#1
-				$predicate_localname,	#2
-				$predicate_namespace,	#3
-				$object_localname,	#4
-				$object_namespace,	#5
-				$object_literal ) {	#6
-		if(defined $idx) {
-			$Windex|=(	(exists $class->{options}->{Compression}) &&
-					($class->{options}->{Compression}==1) ) ?
-					$class->_decode( $class->{Windex}->{$idx} ) :
-					$class->{Windex}->{$idx} #FETCH
-				if(exists $class->{Windex}->{$idx}); #EXISTS
-			vec($mask,$bitno,1)|=1;
-
-#print STDERR "A- $bitno(".(
-#		( $subject 	? $subject->toString 	: '').",".
-#		( $predicate 	? $predicate->toString 	: '').",".
-#		( $object 	? $object->toString 	: '') ).")--".length($Windex)."-->'",unpack("b*",$Windex),"'-mask='",unpack("b*",$mask),"'(".length($mask).")\n\n";
-		};
-		$bitno++;
-	};
-
-	my $pos=-1;
-	my @ids;
-	while( ($pos=index($Windex,$mask,$pos)) > -1 ) {
-		push @ids,$pos;
-#print STDERR "_fetchRDFNode() ",(
-#		( $subject      ? $subject->toString    : '').",".
-#		( $predicate    ? $predicate->toString  : '').",".
-#		( $object       ? $object->toString     : '') )," - found at '$pos'\n";
-		$pos++;
-	};
-
-        return @ids;
-};
-
-sub DESTROY {
-        $_[0]->_untie
-                if($_[0]->_tied);
-};
-
-package RDFStore::Model::Statements;
+# simple front-end to RDFStore::Iterator using a the given nodeFactory
+package RDFStore::Model::Iterator;
 
 use vars qw ( $VERSION );
 use strict;
 
 $VERSION = '0.1';
 
-BEGIN {
-        $Data::MagicTie::Array::perl_version_ok=
-		($] ge '5.6.0') ? 1 : 0;
-};
-
 sub new {
-        return $_[0]->TIEARRAY(@_);
-};
-
-sub TIEARRAY {
-        my ($pkg,$model,@ids) = @_;
+	my ($pkg,$factory,$iterator) = @_;
 
 	return
-                unless(defined $model);
+                unless(	(defined $iterator) &&
+			(ref($iterator)) &&
+			($iterator->isa("RDFStore::Iterator")) &&
+			(defined $factory) &&
+			(ref($factory)) &&
+			($factory->isa("RDFStore::NodeFactory")) );
 
         return 	bless {
-			model => 	$model,
-			ids => \@ids,
-			remove_holes	=>	0
-	},$pkg;
-};
-
-sub FETCH {
-	my($class,$key) = @_;
-
-	if($#{$class->{ids}}>=0) {
-		$key=$class->{ids}->[$key];
-		$key*=8;
-	} else {
-		$key+=$class->{remove_holes};
-		$key*=8;
-
-		while(!(exists $class->{model}->{statements}->{
-			$class->{model}->_getLookupValue($key)})) {	#EXISTS
-			$class->{remove_holes}++;
-			$key+=8;
-		};
+			factory => 	$factory,
+			iterator => 	$iterator
+		},$pkg;
 	};
 
-#print STDERR caller,"FETCH($key)\n";
-
-	# here are all the DB operations needed to fetch a statement
-	# NOTE: if we return directly properties in a tied hash should be faster....
-	#
-	# 4+(1|2) EXISTS & FETCH
-	my @nodeids;
-	for my $ff (0,1,2,3,6,4,5) { #see model add() method
-		next
-			if(	(($ff==4) || ($ff==5)) &&
-				(defined $nodeids[6]) ); #save 2 EXISTS/FETCH :)
-			
-		if(	($ff==0) || #skip the EXISTS above :)
-			(exists $class->{model}->{statements}->{
-				$class->{model}->_getLookupValue($key+$ff)}) ) {	#EXISTS
-			$nodeids[$ff]= $class->{model}->{statements}->{
-					$class->{model}->_getLookupValue($key+$ff)}; #FETCH
-			$nodeids[$ff]= $class->{model}->{resources}->{$nodeids[$ff]} #FETCH	
-				if(	(	($ff==0) || 
-						($ff==2) || 
-						($ff==4) ) &&
-					(exists $class->{model}->{resources}->{$nodeids[$ff]}) ); #EXISTS
-			$nodeids[$ff]= $class->{model}->{namespaces}->{$nodeids[$ff]} #FETCH	
-				if(	(	($ff==1) || 
-						($ff==3) || 
-						($ff==5) ) &&
-					(exists $class->{model}->{namespaces}->{$nodeids[$ff]}) ); #EXISTS
-			$nodeids[$ff]= $class->{model}->{literals}->{$nodeids[$ff]} #FETCH	
-				if(	($ff==6) &&
-					(exists $class->{model}->{literals}->{$nodeids[$ff]}) ); #EXISTS
-		};
+sub size {
+	return $_[0]->{iterator}->size;
 	};
+
+sub duplicate {
+	return $_[0]->{iterator}->duplicate;
+	};
+
+sub hasnext {
+	return $_[0]->{iterator}->hasnext;
+	};
+
+sub remove {
+	return $_[0]->{iterator}->remove;
+	};
+
+sub intersect {
+	return
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+			($_[1]->isa("RDFStore::Model::Iterator")) );
+
+	return new RDFStore::Model::Iterator(	$_[0]->{factory},
+						$_[0]->{iterator}->intersect( $_[1]->{iterator} ) );
+	};
+
+sub unite {
+	return
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+			($_[1]->isa("RDFStore::Model::Iterator")) );
+
+	return new RDFStore::Model::Iterator(	$_[0]->{factory},
+						$_[0]->{iterator}->unite( $_[1]->{iterator} ) );
+	};
+
+sub subtract {
+	return
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+			($_[1]->isa("RDFStore::Model::Iterator")) );
+
+	return new RDFStore::Model::Iterator(	$_[0]->{factory},
+						$_[0]->{iterator}->subtract( $_[1]->{iterator} ) );
+	};
+
+sub complement {
+	return
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+			($_[1]->isa("RDFStore::Model::Iterator")) );
+
+	return new RDFStore::Model::Iterator(	$_[0]->{factory},
+						$_[0]->{iterator}->complement( $_[1]->{iterator} ) );
+	};
+
+sub exor {
+	return
+		unless(	(defined $_[1]) &&
+			(ref($_[1])) &&
+			($_[1]->isa("RDFStore::Model::Iterator")) );
+
+	return new RDFStore::Model::Iterator(	$_[0]->{factory},
+						$_[0]->{iterator}->exor( $_[1]->{iterator} ) );
+	};
+
+sub next {
+	my ($st) = $_[0]->{iterator}->next;
 
 	return
-		unless($#nodeids>=2); #minimal statement is (genid1,genid2,"object")
+		unless($st);
 
-	my $factory=$class->{model}->getNodeFactory;
-	my $subject=$factory->createResource(
-			$nodeids[1] ? 
-				($nodeids[1],$nodeids[0]) : 
-				($nodeids[0]) );
-	my $predicate=$factory->createResource(
-			$nodeids[3] ? 
-				($nodeids[3],$nodeids[2]) : 
-				($nodeids[2]) );
+	return $_[0]->{factory}->createStatement(
+			( $st->subject->isbNode ) ? 
+				$_[0]->{factory}->createAnonymousResource( $st->subject->toString ) : 
+				$_[0]->{factory}->createResource( $st->subject->toString ),
+			( $st->predicate->isbNode ) ? # I know that is not possible but we allow it anyway ;-/
+				$_[0]->{factory}->createAnonymousResource( $st->predicate->toString ) : 
+				$_[0]->{factory}->createResource( $st->predicate->toString ),
+			( $st->object->isa("RDFStore::Literal") ) ?
+				$_[0]->{factory}->createLiteral(	$st->object->getLabel,
+									$st->object->getParseType,
+									$st->object->getLang,
+									$st->object->getDataType ) :
+			( $st->object->isbNode ) ? 
+				$_[0]->{factory}->createAnonymousResource( $st->object->toString ) : 
+				$_[0]->{factory}->createResource( $st->object->toString ),
+			( $st->context ) ?  ( $st->context->isbNode ) ? 
+						$_[0]->{factory}->createAnonymousResource( $st->context->toString ) : 
+						$_[0]->{factory}->createResource( $st->context->toString ) : undef );
+	};
 
-        my $object;
-        if(defined $nodeids[6]) {
-        	$object = $factory->createLiteral($nodeids[6]);
-        } else {
-		$object=$factory->createResource(
-				$nodeids[5] ? 
-					($nodeids[5],$nodeids[4]) : 
-					($nodeids[4]) );
+sub next_subject {
+	my ($n) = $_[0]->{iterator}->next_subject;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+			$_[0]->{factory}->createAnonymousResource( $n->toString ) : 
+			$_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub next_predicate {
+	my ($n) = $_[0]->{iterator}->next_predicate;
+
+        return
+                unless($n); 
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub next_object {
+	my ($n) = $_[0]->{iterator}->next_object;
+
+        return
+                unless($n); 
+
+	return ( $n->isa("RDFStore::Literal") ) ?
+               	$_[0]->{factory}->createLiteral(	$n->getLabel,
+                                                        $n->getParseType,
+                                                        $n->getLang,
+                                                        $n->getDataType ) :
+               ( $n->isbNode ) ?
+                	$_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub next_context {
+	my ($n) = $_[0]->{iterator}->next_context;
+
+        return
+                unless($n); 
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub current {
+	my ($st) = $_[0]->{iterator}->current;
+
+        return
+                unless($st);
+
+	return $_[0]->{factory}->createStatement(
+                        ( $st->subject->isbNode ) ?
+                                $_[0]->{factory}->createAnonymousResource( $st->subject->toString ) :
+                                $_[0]->{factory}->createResource( $st->subject->toString ),
+                        ( $st->predicate->isbNode ) ? # I know that is not possible but we allow it anyway ;-/
+                                $_[0]->{factory}->createAnonymousResource( $st->predicate->toString ) :
+                                $_[0]->{factory}->createResource( $st->predicate->toString ),
+                        ( $st->object->isa("RDFStore::Literal") ) ?
+                                $_[0]->{factory}->createLiteral(        $st->object->getLabel,
+                                                                        $st->object->getParseType,
+                                                                        $st->object->getLang,
+                                                                        $st->object->getDataType ) :
+                        ( $st->object->isbNode ) ? 
+                                $_[0]->{factory}->createAnonymousResource( $st->object->toString ) : 
+                                $_[0]->{factory}->createResource( $st->object->toString ), 
+                        ( $st->context ) ?  ( $st->context->isbNode ) ?                  
+                                                $_[0]->{factory}->createAnonymousResource( $st->context->toString ) :
+                                                $_[0]->{factory}->createResource( $st->context->toString ) : undef );
+	};
+
+sub current_subject {
+	my ($n) = $_[0]->{iterator}->current_subject;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub current_predicate {
+	my ($n) = $_[0]->{iterator}->current_predicate;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub current_object {
+	my ($n) = $_[0]->{iterator}->current_object;
+
+        return
+                unless($n);
+
+        return ( $n->isa("RDFStore::Literal") ) ?
+                $_[0]->{factory}->createLiteral(        $n->getLabel,
+                                                        $n->getParseType,
+                                                        $n->getLang,
+                                                        $n->getDataType ) :
+               ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub current_context {  
+	my ($n) = $_[0]->{iterator}->current_context;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
         };
 
-	return $factory->createStatement($subject,$predicate,$object);
-};
+sub first {
+	my ($st) = $_[0]->{iterator}->first;
 
-sub FETCHSIZE {
+        return
+                unless($st);
 
-#print STDERR (caller), "-FETCHSIZE: ",(($#{$_[0]->{ids}}>=0) ? $#{$_[0]->{ids}} : $_[0]->{model}->size-1),"\n";
+	return $_[0]->{factory}->createStatement(
+                        ( $st->subject->isbNode ) ?
+                                $_[0]->{factory}->createAnonymousResource( $st->subject->toString ) :
+                                $_[0]->{factory}->createResource( $st->subject->toString ),
+                        ( $st->predicate->isbNode ) ? # I know that is not possible but we allow it anyway ;-/
+                                $_[0]->{factory}->createAnonymousResource( $st->predicate->toString ) :
+                                $_[0]->{factory}->createResource( $st->predicate->toString ),
+                        ( $st->object->isa("RDFStore::Literal") ) ?
+                                $_[0]->{factory}->createLiteral(        $st->object->getLabel,
+                                                                        $st->object->getParseType,
+                                                                        $st->object->getLang,
+                                                                        $st->object->getDataType ) :
+                        ( $st->object->isbNode ) ? 
+                                $_[0]->{factory}->createAnonymousResource( $st->object->toString ) : 
+                                $_[0]->{factory}->createResource( $st->object->toString ), 
+                        ( $st->context ) ?  ( $st->context->isbNode ) ?                  
+                                                $_[0]->{factory}->createAnonymousResource( $st->context->toString ) :
+                                                $_[0]->{factory}->createResource( $st->context->toString ) : undef );
+	};
 
-	return ($#{$_[0]->{ids}}>=0) ? $#{$_[0]->{ids}}+1 : $_[0]->{model}->size;
-};
+sub first_subject {
+	my ($n) = $_[0]->{iterator}->first_subject;
 
-sub STORESIZE {
-};
+        return
+                unless($n);
 
-sub STORE {
-};
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
 
-sub DESTROY {
-};
+sub first_predicate {
+	my ($n) = $_[0]->{iterator}->first_predicate;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub first_object {
+	my ($n) = $_[0]->{iterator}->first_object;
+
+        return
+                unless($n);
+
+        return ( $n->isa("RDFStore::Literal") ) ?
+                $_[0]->{factory}->createLiteral(        $n->getLabel,
+                                                        $n->getParseType,
+                                                        $n->getLang,
+                                                        $n->getDataType ) :
+               ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub first_context {  
+	my ($n) = $_[0]->{iterator}->first_context;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+        };
+
+sub each {
+	my ($st) = $_[0]->{iterator}->each;
+
+        return
+                unless($st);
+
+	return $_[0]->{factory}->createStatement(
+                        ( $st->subject->isbNode ) ?
+                                $_[0]->{factory}->createAnonymousResource( $st->subject->toString ) :
+                                $_[0]->{factory}->createResource( $st->subject->toString ),
+                        ( $st->predicate->isbNode ) ? # I know that is not possible but we allow it anyway ;-/
+                                $_[0]->{factory}->createAnonymousResource( $st->predicate->toString ) :
+                                $_[0]->{factory}->createResource( $st->predicate->toString ),
+                        ( $st->object->isa("RDFStore::Literal") ) ?
+                                $_[0]->{factory}->createLiteral(        $st->object->getLabel,
+                                                                        $st->object->getParseType,
+                                                                        $st->object->getLang,
+                                                                        $st->object->getDataType ) :
+                        ( $st->object->isbNode ) ? 
+                                $_[0]->{factory}->createAnonymousResource( $st->object->toString ) : 
+                                $_[0]->{factory}->createResource( $st->object->toString ), 
+                        ( $st->context ) ?  ( $st->context->isbNode ) ?                  
+                                                $_[0]->{factory}->createAnonymousResource( $st->context->toString ) :
+                                                $_[0]->{factory}->createResource( $st->context->toString ) : undef );
+	};
+
+sub each_subject {
+	my ($n) = $_[0]->{iterator}->each_subject;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub each_predicate {
+	my ($n) = $_[0]->{iterator}->each_predicate;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub each_object {
+	my ($n) = $_[0]->{iterator}->each_object;
+
+        return
+                unless($n);
+
+        return ( $n->isa("RDFStore::Literal") ) ?
+                $_[0]->{factory}->createLiteral(        $n->getLabel,
+                                                        $n->getParseType,
+                                                        $n->getLang,
+                                                        $n->getDataType ) :
+               ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+	};
+
+sub each_context {  
+	my ($n) = $_[0]->{iterator}->each_context;
+
+        return
+                unless($n);
+
+        return ( $n->isbNode ) ?
+                        $_[0]->{factory}->createAnonymousResource( $n->toString ) :
+                        $_[0]->{factory}->createResource( $n->toString );
+        };
 
 1;
 };
@@ -1459,7 +1395,7 @@ RDFStore::Model - An implementation of the Model RDF API using tied hashes and i
 				);
 
 	use RDFStore::Model;
-	my $model = new RDFStore::Model( Name => 'store', Split => 20, Compression => 1, FreeText => 1 );
+	my $model = new RDFStore::Model( Name => 'store', FreeText => 1 );
 
 	$model->add($statement);
 	$model->add($statement1);
@@ -1495,11 +1431,16 @@ RDFStore::Model - An implementation of the Model RDF API using tied hashes and i
         	print $found->elements->{$_}->getLabel(),"\n";
 	};
 
+	# set operations
+        my $set = new RDFStore::Model( Name => 'setmodel' );
+
+        $set=$set->interset($other_model);
+        $set=$set->unite($other_model);
+        $set=$set->subtract($other_model);
+
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::Model implementation using Data::MagicTie tied arrays and hashes to store triplets. The actual store could be tied either to an in-memory, a local or remote database - see Data::MagicTie(3).
-
-This modules implements a storage and iterator by leveraging on perltie(3) and the Data::MagicTie(3) interface. A compact indexing model is used that allows to make free-text indexing up to literals.
+An RDFStore::Model implementation using RDFStore(3) to store triplets.
 
 =head1 CONSTRUCTORS
  
@@ -1507,7 +1448,8 @@ The following methods construct/tie RDFStore::Model storages and objects:
 
 =item $model = new RDFStore::Model( %whateveryoulikeit );
  
-Create an new RDFStore::Model object and tie up a serie of Data::MagicTie hash databases to read/write/query RDFStore::RDFNode. The %whateveryoulikeit hash contains a set of configuration options about how and where store actual data. Most of the options correspond to the Data::MagicTie ones - see Data::MagicTie(3)
+Create an new RDFStore::Model object and tie up the RDFStore(3). The %whateveryoulikeit hash contains a set of configuration options about how and where store actual data.
+
 Possible additional options are the following:
 
 =over 4
@@ -1520,18 +1462,13 @@ This is a label used to identify a B<Persistent> storage by name. It might corre
 
 Sync the RDFStore::Model with the underling Data::MagciTie GDS after each add() or remove().
 
-=item Compression
-
-Switch on Run Length Encoding (RLE) on the internal index; this option allows to save a lot of space (or memory) if you are going to manage large models. For tiny models is
-faster to use I<no> compression.
-
 =item FreeText
 
 Enable free text searching on literals over a model (see B<find>)
 
 =head1 SEE ALSO
 
-Data::MagicTie(3) Digest(3) RDFStore::Stanford::Digest::Digestable(3) RDFStore::Stanford::Digest(3) RDFStore::RDFNode RDFStore::Resource RDFStore::FindIndex(3)
+Digest(3) RDFStore(3) RDFStore::Digest::Digestable(3) RDFStore::Digest(3) RDFStore::RDFNode(3) RDFStore::Resource(3)
 
 =head1 AUTHOR
 

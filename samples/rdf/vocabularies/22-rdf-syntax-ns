@@ -1,48 +1,131 @@
-<?xml version="1.0"?>
+<rdf:RDF
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+   xmlns:owl="http://www.w3.org/2002/07/owl#" 
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
 
-<RDF
-  xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-  xmlns:s="http://www.w3.org/2000/01/rdf-schema#"> <!-- updated RDF M&S ns by AR 2001/06/12 -->
+ <owl:Ontology 
+     rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <dc:title>The RDF Vocabulary (RDF)</dc:title>
+   <dc:description>This is the RDF Schema for the RDF vocabulary defined in the RDF namespace.</dc:description>
+ </owl:Ontology>
 
-<!--
-  This is the RDF Schema for the RDF data model as described in the
-  Resource Description Framework (RDF) Model and Syntax Specification
-  http://www.w3.org/TR/REC-rdf-syntax -->
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#type">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>type</rdfs:label>
+  <rdfs:comment>The subject is an instance of a class.</rdfs:comment>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
 
-<s:Class rdf:ID="Statement"
-  s:comment="A triple consisting of a predicate, a subject, and an object." />
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#Property">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>Property</rdfs:label>
+  <rdfs:comment>The class of RDF properties.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdfs:Class>
 
-<s:Class rdf:ID="Property"
-  s:comment="A name of a property, defining specific meaning for the property" />
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>Statement</rdfs:label>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:comment>The class of RDF statements.</rdfs:comment>
+</rdfs:Class>
 
-<s:Class rdf:ID="Bag"
-  s:comment="An unordered collection" />
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#subject">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>subject</rdfs:label>
+  <rdfs:comment>The subject of the subject RDF statement.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
 
-<s:Class rdf:ID="Seq"
-  s:comment="An ordered collection" />
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>predicate</rdfs:label>
+  <rdfs:comment>The predicate of the subject RDF statement.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
 
-<s:Class rdf:ID="Alt"
-  s:comment="A collection of alternatives" />
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#object">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>object</rdfs:label>
+  <rdfs:comment>The object of the subject RDF statement.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
 
-<Property ID="predicate"
-  s:comment="Identifies the property used in a statement when representing the statement in reified form">
-  <s:domain rdf:resource="#Statement" />
-  <s:range rdf:resource="#Property" />
-</Property>
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>Bag</rdfs:label>
+  <rdfs:comment>The class of unordered containers.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Container"/>
+</rdfs:Class>
 
-<Property ID="subject"
-  s:comment="Identifies the resource that a statement is describing when representing the statement in reified form">
-  <s:domain rdf:resource="#Statement" />
-</Property>
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#Seq">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>Seq</rdfs:label>
+  <rdfs:comment>The class of ordered containers.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Container"/>
+</rdfs:Class>
 
-<Property ID="object"
-  s:comment="Identifies the object of a statement when representing the statement in reified form" />
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#Alt">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>Alt</rdfs:label>
+  <rdfs:comment>The class of containers of alternatives.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Container"/>
+</rdfs:Class>
 
-<Property ID="type"
-  s:comment="Identifies the Class of a resource" />
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#value">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>value</rdfs:label>
+  <rdfs:comment>Idiomatic property used for structured values.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
 
-<Property ID="value"
-  s:comment="Identifies the principal value (usually a string) of a property when the property value is a structured resource" />
+<!-- the following are new additions, Nov 2002 -->
 
-</RDF>
+<rdfs:Class rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#List">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>List</rdfs:label>
+  <rdfs:comment>The class of RDF Lists.</rdfs:comment>
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdfs:Class>
+
+<rdf:List rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>nil</rdfs:label>
+  <rdfs:comment>The empty list, with no items in it. If the rest of a list is nil then the list has no more items in it.</rdfs:comment>
+</rdf:List>
+
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#first">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>first</rdfs:label>
+  <rdfs:comment>The first item in the subject RDF list.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#List"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2000/01/rdf-schema#Resource"/>
+</rdf:Property>
+
+<rdf:Property rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#rest">
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>rest</rdfs:label>
+  <rdfs:comment>The rest of the subject RDF list after the first item.</rdfs:comment>
+  <rdfs:domain rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#List"/>
+  <rdfs:range rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#List"/>
+</rdf:Property>
+	
+<rdfs:Datatype rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral">
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#Literal"/> 
+  <rdfs:isDefinedBy rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+  <rdfs:label>XMLLiteral</rdfs:label>
+  <rdfs:comment>The class of XML literal values.</rdfs:comment>
+</rdfs:Datatype>
+
+<rdf:Description rdf:about="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdfs:seeAlso rdf:resource="http://www.w3.org/2000/01/rdf-schema-more"/>
+</rdf:Description>
+
+</rdf:RDF>
+

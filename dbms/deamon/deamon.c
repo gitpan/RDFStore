@@ -1,42 +1,22 @@
-/* DBMS Server
- * $Id: deamon.c,v 1.2 2001/06/18 15:26:17 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * NOTICE
  *
- * based on UKDCils
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: deamon.c,v 1.25 2004/08/19 18:57:36 areggiori Exp $
+ */ 
 
 #include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
 #include "dbmsd.h"
 
 #include "deamon.h"
@@ -48,45 +28,61 @@ int client_counter = 0; /* XX static perhaps */
 
 #ifdef STATIC_BUFF
 static connection * free_connection_list = NULL;
+static int free_connection_keep = 2;
+static int free_connection_keep_max = 4;
+static int free_connection_len = 0;
 #endif
 
-#define PTOK { int i; for(i=0; i<sizeof(cmd_table) / sizeof(struct command_req); i++) if ( cmd_table[i].cmd == r->cmd.token ) { log(L_DEBUG,"Token at %s:%d %s s=%d,%d",__FILE__,__LINE__, cmd_table[i].info,r->cmd.len1,r->cmd.len2); break; }; if(i>=sizeof(cmd_table) / sizeof(struct command_req)) log(L_DEBUG,"Token at %s:%d %s %d,%d",__FILE__,__LINE__, "**UNKOWN**",r->cmd.len1,r->cmd.len2); }
+#define PTOK { int i; for(i=0; i<sizeof(cmd_table) / sizeof(struct command_req); i++) if ( cmd_table[i].cmd == r->cmd.token ) { dbms_log(L_DEBUG,"Token at %s:%d %s s=%d,%d",__FILE__,__LINE__, cmd_table[i].info,r->cmd.len1,r->cmd.len2); break; }; if(i>=sizeof(cmd_table) / sizeof(struct command_req)) dbms_log(L_DEBUG,"Token at %s:%d %s %d,%d",__FILE__,__LINE__, "**UNKOWN**",r->cmd.len1,r->cmd.len2); }
 
 void 
-close_connection ( connection * r ) {
-
+close_connection ( connection * r ) 
+{
+	/* assert(r->clientfd); */
         FD_CLR(r->clientfd,&allwset);
         FD_CLR(r->clientfd,&allrset);
         FD_CLR(r->clientfd,&alleset);
 	close(r->clientfd);
+	r->clientfd = 0;
 
         /* shutdown(r->clientfd,2); */
 
-#ifndef STATIC_SC_BUFF
-        if (r->sendbuff != NULL)
+        if (r->sendbuff != NULL) {
                 myfree(r->sendbuff);
-		  r->sendbuff = NULL;
-#endif
+		r->sendbuff = NULL;
+	};
 
-#ifndef STATIC_CS_BUFF
-        if (r->recbuff != NULL)
+        if (r->recbuff != NULL) {
                 myfree(r->recbuff);
-	 	r->sendbuff = NULL;
-#endif
+	 	r->recbuff = NULL;
+	};
 
 	r->send = r->tosend = 0;
 	r->gotten = r->toget = 0;
 
 	r->close = 2; MX;
+
+#ifdef STATIC_BUFF
+	if (free_connection_len < free_connection_keep) {
+		r->next = free_connection_list;
+		/* assert( free_connection_list != r ); */
+		free_connection_list = r;
+		free_connection_len++;
+	} else 
+#endif
+	myfree(r);
+
+	client_counter --;
+
         return;
-        }
+}
                        
 void free_connection (connection * r ) {
 
 	if (r->type == C_MUM) {
 		/* connection to the mother lost.. we _must_ exit now.. */
 		if (!going_down) 
-			log(L_FATAL,"Mamma has died.. suicide time for child, fd=%d",r->clientfd);
+			dbms_log(L_FATAL,"Mamma has died.. suicide time for child, fd=%d",r->clientfd);
 		cleandown(0);
 		} else
 	if (r->type == C_CLIENT) {
@@ -97,14 +93,14 @@ void free_connection (connection * r ) {
 			 */
 			r->dbp->num_cls --;
 			if (r->dbp->num_cls<=0) {
-				log(L_INFORM,"Child was the last one to use %s, closing\n", 
+				dbms_log(L_INFORM,"Child was the last one to use %s, closing", 
 					r->dbp->pfile);
 				r->dbp->close = 1; MX;
 				};
-			log(L_DEBUG,"Connection to client closed");
+			dbms_log(L_DEBUG,"Connection to client closed");
 			} 
 		else {
-			log(L_WARN,"C_Client marked with no database ?");
+			dbms_log(L_WARN,"C_Client marked with no database ?");
 			}
 		} else 
 	if (r->type == C_NEW_CLIENT) {
@@ -112,10 +108,10 @@ void free_connection (connection * r ) {
 		 * to send a message...
 		 * 
 		 */
-		log(L_ERROR,"New child closing.. but then what ?");
+		dbms_log(L_ERROR,"New child closing.. but then what ?");
 		} else 
 	if (r->type == C_LEGACY) {
-		log(L_DEBUG,"Legacy close");
+		dbms_log(L_DEBUG,"Legacy close");
 		} else 
 	if (r->type == C_CHILD) {
 #ifdef FORKING
@@ -128,12 +124,12 @@ void free_connection (connection * r ) {
 		for(p=first_dbp;p;p=p->nxt)
 			if (p->handled_by->r == r) {
 				if ((c) && (p->handled_by != c))
-					log(L_ERROR,"More than one child pointer ?");
+					dbms_log(L_ERROR,"More than one child pointer ?");
 				p->close = 1; MX;
 				c = p->handled_by;
 				};
 		if (c==NULL) {
-			log(L_ERROR,"Child died, but no record..");
+			dbms_log(L_ERROR,"Child died, but no record..");
 			} 
 		else {
 		/* overkill, as we do not even wait for the
@@ -142,31 +138,23 @@ void free_connection (connection * r ) {
 		c->close = 1; MX;
 		if (kill(c->pid,0) == 0) {
 			/* so the child is still alive ? */
-			log(L_DEBUG,"Sending kill signal (%d) to %d",
+			dbms_log(L_DEBUG,"Sending kill signal (%d) to %d",
 				SIGTERM,c->pid);
 			kill(c->pid,SIGTERM);
 			};
 		};
 #else
-		log(L_ERROR,"We are non forking, but still see a C_CHILD");
+		dbms_log(L_ERROR,"We are non forking, but still see a C_CHILD");
 #endif
 		} 
 	else {
-		log(L_ERROR,"Zapping a rather unkown connection type?");
+		dbms_log(L_ERROR,"Zapping a rather unkown connection type?");
 		};
 
 	r->type = C_UNK;
 	close_connection(r);
-#ifndef STATIC_BUFF
-	myfree(r);
-#else
-	r->next = free_connection_list;
-	assert( free_connection_list != r );
-	free_connection_list = r;
-#endif
-	client_counter --;
 	return;
-	}
+}
 
 void zap ( connection * r ) {
 	connection * * p;
@@ -175,7 +163,7 @@ void zap ( connection * r ) {
 		p = &((*p)->next);
 
 	if ( *p == NULL) {
-		log(L_ERROR,"Connection to zap not found");
+		dbms_log(L_ERROR,"Connection to zap not found");
 		return;
 		};
 
@@ -184,11 +172,10 @@ void zap ( connection * r ) {
 	}
 
 
-void cleandown( int signo ) { 
-        connection * r;
-
+void cleandown( int signo ) 
+{ 
 	if (going_down) 
-		log(L_ERROR,"Re-entry of cleandown().");
+		dbms_log(L_ERROR,"Re-entry of cleandown().");
 
 	going_down = 1;
 
@@ -204,24 +191,31 @@ void cleandown( int signo ) {
 #ifdef FORKING
 	clean_children();
 #endif
-
-        for( r=client_list; r;) {
+{
+        connection * r;
+        for(r=client_list; r;) {
                 connection * q;
                 q = r; r=r->next;
 		assert(q != r);
                 close_connection(q);
-                };
+        }
+}
 
-#ifdef DEBUG_MALLOC
-	debug_malloc_dump();
+	/* close connection to mother */
+	if (mum)
+		close_connection(mum);
+
+
+#ifdef RDFSTORE_DBMS_DEBUG_MALLOC
+	debug_malloc_dump(stderr);
 #endif
-#ifdef TIME_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
 	fprintf(stderr,"Timedebug: Time waiting=%f, handling=%f network=%f\n",.1,.2,.3);
 #endif
 	if (!mum_pid)
 		unlink(pid_file);	
 
-	log(L_WARN,"Shutdown completed");
+	dbms_log(L_WARN,"Shutdown completed");
 	exit(0);
 	}
 
@@ -229,31 +223,31 @@ void continue_send( connection * r ) {
 	int s;
 
 	if ((r->tosend==0) || ( r->send >= r->tosend)) {
-		log(L_ERROR,"How did we get here ?");
+		dbms_log(L_ERROR,"How did we get here ?");
 		r->close=1; MX;
 		return;
 		};
 
 	s = write(r->clientfd,r->sendbuff+r->send,r->tosend - r->send);
 
-	if ((s<0) && (errno == EINTR))  {
-		log(L_INFORM,"Continued send interrupted. Retry.");
+	if ((s<=0) && (errno == EINTR))  {
+		dbms_log(L_INFORM,"Continued send interrupted. Retry.");
 		return;
 		} 
 	else
 	if ((s<0) && (errno == EAGAIN))  {
-		log(L_WARN,"Continued send would still block");
+		dbms_log(L_WARN,"Continued send would still block");
 		return;
 		} 
 	else
 	if (s<0) {
-		log(L_ERROR,"Failed to continue write %s",strerror(errno));
+		dbms_log(L_ERROR,"Failed to continue write %s",strerror(errno));
 		r->close=1;
 		return;
 		}
 	else
 	if (s==0) {
-		log(L_ERROR,"Client closed the connection on us");
+		dbms_log(L_ERROR,"Client closed the connection on us");
 		r->close=1;
 		return;
 		}	
@@ -265,19 +259,20 @@ void continue_send( connection * r ) {
 	r->send = r->tosend = 0;
 
 #ifndef STATIC_SC_BUFF
-	myfree( r->sendbuff );
+	if (r->sendbuff)
+		myfree( r->sendbuff );
 	r->sendbuff = NULL;
 #endif
 
 	FD_CLR(r->clientfd,&allwset);
 	return;
-	}
+}
 	
 void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	int s;
 
 	if ((r->tosend != 0) && (r->send !=0)) {
-		log(L_WARN,"dispatch, but still older data left to send");
+		dbms_log(L_WARN,"dispatch, but still older data left to send");
 		goto fail_dispatch;
 		};
 
@@ -301,7 +296,7 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	r->cmd.len1 = htonl( r->cmd.len1 );
 	r->cmd.len2 = htonl( r->cmd.len2 );
 
-#ifdef TIME_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
 	gettimeofday(&(r->cmd.stamp),NULL);
 #endif
 	/* BUG: we also use this with certain errors, in an attempt to
@@ -312,30 +307,32 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 
 	if (s<0) {
 		if (errno == EINTR) {
-			log(L_INFORM,"Initial write interrupted. Ignored");
+			dbms_log(L_INFORM,"Initial write interrupted. Ignored");
 			s=0;	
 			}
 		else
 		if (errno == EAGAIN) {
-			log(L_INFORM,"Initial write would block");
+			dbms_log(L_INFORM,"Initial write would block");
 			s = 0;
 			}
 		else {
-			log(L_ERROR,"Initial write error: %s",strerror(errno));
+			dbms_log(L_ERROR,"Initial write error: %s",strerror(errno));
 			goto fail_dispatch;
 			};
 		}
 	else
-	if (s==0) {
-		log(L_ERROR,"Intial write; client closed connection");
+	if ((s==0) && (errno != EINTR)) {
+		dbms_log(L_ERROR,"Intial write; client closed connection");
 		goto fail_dispatch;
-		};
+	};
 
 	r->send += s;
 	if (r->send == r->tosend) {
 		r->send = 0;
 		r->tosend =0;
 #ifndef STATIC_SC_BUFF
+		if (r->sendbuff)
+			myfree(r->sendbuff);
 		r->sendbuff = NULL;
 #endif
 		}
@@ -346,7 +343,7 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	
 #if STATIC_SC_BUFF
 		if (r->tosend-r->send > MAX_SC_PAYLOAD) {
-			log(L_ERROR,	
+			dbms_log(L_ERROR,	
 				"Secondary write buffer of %d>%d bytes to big",
 				r->tosend - r->send,
 				MAX_SC_PAYLOAD
@@ -354,15 +351,19 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 			goto fail_dispatch;
 			};
 #else
+		assert(r->tosend > r->send );
 		r->sendbuff = mymalloc( r->tosend - r->send );
+#endif
+		assert(r->sendbuff);
+
 		if (r->sendbuff == NULL) {
-			log(L_ERROR,	
+			dbms_log(L_ERROR,	
 				"Out of memory whilst creating a secondary write buffer of %d bytes",
 				r->tosend - r->send
 				);
 			goto fail_dispatch;
-			};
-#endif
+		};
+
 		for(p=r->sendbuff,i=0,at=0; i < 3; i++) {
 			if ( at > r->send ) {
 				memcpy(p, r->iov[i].iov_base,r->iov[i].iov_len);
@@ -395,7 +396,7 @@ void dispatch( connection * r, int token, DBT * v1, DBT * v2) {
 	return;
 
 fail_dispatch:
-	log(L_WARN,"dispatch failed");
+	dbms_log(L_WARN,"dispatch failed");
 	r->close=1;MX;
 	return;
 	}
@@ -410,17 +411,26 @@ void do_msg ( connection * r, int token, char * msg) {
 	return;
 	}
 
+connection *
+handle_new_local_connection( 
+	int clientfd, int type
+	)
+{
+	struct sockaddr_in none;
+	none.sin_addr.s_addr = INADDR_NONE;
+	return handle_new_connection(clientfd, type, none);
+}
 
 connection *
 handle_new_connection( 
-	int clientfd, int type
+	int clientfd, int type, struct sockaddr_in addr
 	)
 {
 	connection * new;
 	int v;
 
 	if (client_counter > HARD_MAX_CLIENTS) {
-		log(L_ERROR,"Max number of clients reached (hard max), completely ignoring");
+		dbms_log(L_ERROR,"Max number of clients reached (hard max), completely ignoring");
 		close(clientfd);
 		return NULL;
 		};
@@ -435,7 +445,7 @@ handle_new_connection(
 		};
 
 	if ( (v=fcntl( clientfd, F_GETFL, 0)<0) || (fcntl(clientfd, F_SETFL,v | O_NONBLOCK)<0) ) {
-		log(L_ERROR,"Could not make socket non blocking: %s",strerror(errno));
+		dbms_log(L_ERROR,"Could not make socket non blocking: %s",strerror(errno));
 		close(clientfd);
 		return NULL;	
 		};
@@ -457,15 +467,25 @@ handle_new_connection(
 	if (free_connection_list != NULL) { 
 		new = free_connection_list;
 		free_connection_list = new->next;
-	}
-	else
+		free_connection_len --;
+	} else {
+		assert(free_connection_len == 0);
+		if (free_connection_keep < free_connection_keep_max/2)
+			free_connection_keep *= 2;
+		else
+		if (free_connection_keep < free_connection_keep_max)
+			free_connection_keep += 2;
 #endif
-	if ((new = (connection *) mymalloc(sizeof(connection))) == NULL ) 
-	{
-		log(L_ERROR,"Could not claim enough memory");
-		close(clientfd);
-		return NULL;
-	};
+		if ((new = (connection *) mymalloc(sizeof(connection))) == NULL ) 
+		{
+			dbms_log(L_ERROR,"Could not claim enough memory");
+			close(clientfd);
+			return NULL;
+		};
+#if STATIC_BUFF
+	}
+#endif
+	bzero(new,sizeof(connection));
         new->next     = client_list;
         client_list   = new;
 
@@ -473,25 +493,32 @@ handle_new_connection(
 
 	/* Copy the needed information. */
 	new->clientfd = clientfd;
-	new->my_dir   = my_dir;
-#ifndef STATIC_SC_BUFF
+
 	new->sendbuff = NULL;
+#ifdef STATIC_SC_BUFF
+	if ((type != C_CHILD))
+		new->sendbuff = (unsigned char *) mymalloc(MAX_SC_PAYLOAD);
 #endif
-#ifndef STATIC_CS_BUFF
 	new->recbuff  = NULL;
+#ifdef STATIC_CS_BUFF
+	if ((type != C_CHILD))
+		new->recbuff  = (unsigned char *) mymalloc(MAX_CS_PAYLOAD);
 #endif
+
 	new->dbp      = NULL;
 	new->type     = type;
+
 #ifdef TIMEOUT
 	new->start    = time(NULL);
 	new->last     = time(NULL);
 #endif
+	new->address  = addr;
 	new->close      = 0;
 	new->send = new->tosend = new->gotten = new->toget = 0;
 
 	client_counter ++;
 	return new;
-	}
+}
 
 void final_read( connection * r) 
 {
@@ -505,39 +532,41 @@ void final_read( connection * r)
 		};
 #endif
 	return;
-	}
+}
 
 
 void initial_read( connection * r ) {
 	struct header skip_cmd;
 	int n=0;
+
 	/* we peek, untill we have the full command buffer, and
 	 * only then do we give it any attention. This safes a
 	 * few syscalls.
 	 */
+	errno = 0;
 	n=recv(r->clientfd,&(r->cmd),sizeof(r->cmd),MSG_PEEK);
 
-	if (n<0) log(L_DEBUG,"Read nn %s",strerror(errno));
+	if (n<0) dbms_log(L_DEBUG,"Read fd=%d n=%d errno=%d/%s",r->clientfd,n,errno,strerror(errno));
 
 	if ((n < 0) && (errno == EAGAIN)) {
-	   log(L_ERROR,"Again read %s on %d",strerror(errno),r->clientfd);
+	   dbms_log(L_ERROR,"Again read %s on %d",strerror(errno),r->clientfd);
 		return;
 		} 
 	else
-	if ((n < 0) && (errno == EINTR)) {
-	   log(L_ERROR,"Interruped read %s",strerror(errno));
+	if ((n <= 0) && (errno == EINTR)) {
+	   dbms_log(L_ERROR,"Interruped read %s",strerror(errno));
 		return;
 		} 
 	else
 	if (n<0) {
 		if (errno != ECONNRESET)
-			log(L_ERROR,"Read error %s",strerror(errno));
+			dbms_log(L_ERROR,"Read error %s",strerror(errno));
 		r->close=1;MX;
 		return;
 		} 
 	else 
 	if (n==0) {
-		log(L_INFORM,"Client side close on read %d/%s (fd=%d)",
+		dbms_log(L_INFORM,"Client side close on read %d/%s (fd=%d)",
 			errno,strerror(errno),r->clientfd);
 		r->close=1;MX;
 		return;
@@ -547,11 +576,11 @@ void initial_read( connection * r ) {
 		/* lets log this, as we want to get an idea if this actually happens .
 		 * seems not, BSD, on high load, SCO.
 		 */
-		log(L_WARN,"Still waitingn for those 5 bytes, gotten LESS");
+		dbms_log(L_WARN,"Still waitingn for those 5 bytes, gotten LESS");
 		return;
 		}
 	else {
-#ifdef TIMEE_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
  		float s,m;
 		struct timeval t;
 		gettimeofday(&t,NULL);
@@ -595,6 +624,8 @@ void initial_read( connection * r ) {
 #endif
 
 #ifndef STATIC_CS_BUFF
+		if (r->recbuff)
+			myfree(r->recbuff);
 		r->recbuff = NULL;
 #endif
 		r->v2.data = r->v1.data = NULL;
@@ -608,20 +639,23 @@ void initial_read( connection * r ) {
 					r->cmd.len1 + r->cmd.len2,
 					MAX_CS_PAYLOAD
 					);
+				r->close=1; MX;
+				return;
+			}
 #else
 			r->recbuff = mymalloc( r->cmd.len1 + r->cmd.len2 );
+#endif
 			if (r->recbuff == NULL) {
 				reply_log(r,L_ERROR,
 					"No Memrory for RQ string(s) %d bytes",
 					r->cmd.len1 + r->cmd.len2);
-#endif
 				r->close=1; MX;
 				return;
 				};
 			r->v1.data = r->recbuff;
 			r->v2.data = r->recbuff + r->cmd.len1;
 			r->toget = r->cmd.len1 + r->cmd.len2;
-			};
+		}
 
 		r->iov[0].iov_base = (void *) &skip_cmd;
 		r->iov[0].iov_len = sizeof( r->cmd );
@@ -630,37 +664,32 @@ void initial_read( connection * r ) {
 		r->iov[1].iov_len = r->toget;
 
 reread:		
+	   errno = 0;
 	   n = readv( r->clientfd, r->iov, 2);
 
-		if ((n<0) && (errno == EINTR)) {
-			log(L_INFORM,"Interrupted readv. Ignored");
+		if ((n<=0) && (errno == EINTR)) {
+			dbms_log(L_INFORM,"Interrupted readv. Ignored");
 			goto reread;
 			} 
 		else
-		// assert(); but it seems to happen 
 		if ((n<0) && (errno == EAGAIN)) {
-			log(L_ERROR,"Would block. Even though we peeked at the cmd string. Retry");
+			dbms_log(L_ERROR,"Would block. Even though we peeked at the cmd string. Retry");
 			goto reread;
 			} 
 		else
 		if (n<0) {
-			log(L_ERROR,"Error while reading remainder: (1 %s",strerror(errno));
+			dbms_log(L_ERROR,"Error while reading remainder: (1 %s",strerror(errno));
 			r->close=1; MX;
 			return;
 			}
 		else
 		if (n==0) {
-			log(L_INFORM,"Read, but client closed");
+			dbms_log(L_INFORM,"Read, but client closed");
 			r->close=1; MX;
 			return;
-			}
-		else
-		// assert() would be more appropriate.
-		if ( n < sizeof( r->cmd )) {
-			reply_log(r,L_WARN,"Peeked CMD and then someone stole it");
-			r->close=1; MX;
-			return;
-			};
+		};
+
+		assert(n >= sizeof(r->cmd));
 
 		n -= sizeof(r->cmd);
 		r->gotten += n;
@@ -679,30 +708,32 @@ continue_read( connection * r ) {
 	/* fill up the two buffers.. */
 	int s;
 
-	log(L_VERBOSE,"continued read for %d..",r->toget);
+	dbms_log(L_VERBOSE,"continued read for %d..",r->toget);
+	errno = 0;
 	s = read( r->clientfd, r->gotten + r->v1.data, r->toget - r->gotten);
 
-	if ((s<0) && (errno == EINTR)) {
-		log(L_INFORM,"Interrupted continued read. Ignored");
+	if ((s<=0) && (errno == EINTR)) {
+		dbms_log(L_INFORM,"Interrupted continued read. Ignored");
 		return;
 		} 
 	else
 	if (((s<0) && (errno == EAGAIN)) ) {
-		log(L_ERROR,"continued read, but nothing there");
+		dbms_log(L_ERROR,"continued read, but nothing there");
 		return;	
 		}
 	else
 	if (s<0) {
-		log(L_ERROR,"Error while reading remainder: (2 %s",strerror(errno));
+		dbms_log(L_ERROR,"Error while reading remainder: (2 %s",strerror(errno));
 		r->close=1; MX;
 		return;
 		} 
 	else
 	if (s==0) {
-		log(L_ERROR,"continued read, but client closed connection");
+		dbms_log(L_ERROR,"continued read, but client closed connection (%d/%s)",
+			errno,strerror(errno));
 		r->close=1; MX; 
 		return;
-		}; 
+	}; 
 
 	r->gotten +=s;
 

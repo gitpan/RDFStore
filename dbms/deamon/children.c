@@ -1,14 +1,16 @@
-/* DBMS Server
- * $Id: children.c,v 1.2 2001/06/18 15:26:17 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * NOTICE
  *
- * based on UKDCils
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ * DBMS Server
  *
  * Dealing with birth(control) of children, handing of
  * tasks and subsequent reaping of accidentally terminal
@@ -40,35 +42,13 @@
  *	some of the older FreeBSD production boxes give the same
  *	problems we had with the IMS user land hangs. But really
  *	treading would be better; and just require a few mutexi-es.
+ *
+ * $Id: children.c,v 1.19 2004/08/19 18:57:36 areggiori Exp $
  */                                   
 #ifdef FORKING
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
 
 #include "dbms.h"
+#include "dbms_comms.h"
 #include "dbmsd.h"
 
 #include "deamon.h"
@@ -78,16 +58,31 @@
 
 // unpatched solaris and FreeBSD<2.2 need them. I think.
 //
-#ifndef CMSG_LEN                                        
+#ifndef ALIGN
+#define ALIGN(x) (x)
+#endif
+
+#ifndef CMSG_LEN      
+#if RDFSTORE_PLATFORM_SOLARIS
 #define CMSG_LEN(x) (ALIGN(sizeof(struct cmsghdr)) + ALIGN(x))
+#else
+#define CMSG_LEN(x) (_CMSG_HDR_ALIGN(x))
+#endif
 #endif
 
 #ifndef CMSG_SPACE
+#if RDFSTORE_PLATFORM_SOLARIS
 #define CMSG_SPACE(x) ( ALIGN(sizeof(struct cmsghdr)) + x)
+#else
+#define CMSG_SPACE(x) (_CMSG_DATA_ALIGN(x))
+#endif
 #endif
 
 #ifdef STATIC_BUFF
 static child_rec * free_child_list = NULL;
+static int free_child_list_len = 0;
+static int free_child_list_keep= 2;
+static int free_child_list_max = 4;
 #endif
 int child_counter = 0;
 
@@ -112,16 +107,19 @@ retry_snd:
    */
    n=sendmsg(fd,msg,0); 
 
-   if ((n<0) && ((errno=EAGAIN) || (errno=EINTR))) 
+   if ((n<0) && (errno=EAGAIN))
+	goto retry_snd;
+
+   if ((n<=0) && (errno=EINTR)) 
 	goto retry_snd;
  
    if (n<0) { 
-	log(L_ERROR,"Could not atomically send msg: %s",strerror(errno)); 
+	dbms_log(L_ERROR,"Could not atomically send msg: %s",strerror(errno)); 
 	return -1; 
 	} 	
    else
    if (n==0) {
-	log(L_ERROR,"Child closed connection"); 
+	dbms_log(L_ERROR,"Child closed connection"); 
 	return -1; 
 	} 
 
@@ -131,22 +129,23 @@ retry_snd:
 
 void free_child( child_rec * r) 
 {
-	log(L_DEBUG,"Freeing child %x %d\n",r,r->pid);
+	dbms_log(L_DEBUG,"Freeing child %x %d",r,r->pid);
 	if (r->r) {
-		log(L_DEBUG,"And marking close fd=%d\n",r->r->clientfd);
+		dbms_log(L_DEBUG,"And marking close fd=%d",r->r->clientfd);
 		r->r->close = 1; MX;
-		};
+		if (mum_pid)
+			zap(r->r);/* XXXXXXXX */
+	};
 
 #ifdef STATIC_BUFF
-	r->nxt = free_child_list;
-	assert( r != free_child_list);
-	free_child_list = r;
-//	free_child_counter ++;
-//	if ((free_child_counter>>2) > child_counter)
-//		cils_cls(); /* clean when 75% idle */
-#else
-	myfree(r);
+	if (free_child_list_len < free_child_list_keep) {
+		r->nxt = free_child_list;
+		assert( r != free_child_list);
+		free_child_list = r;
+		free_child_list_len ++;
+	} else
 #endif
+	myfree(r);
 
 	child_counter--;
 }
@@ -155,12 +154,12 @@ void zap_child( child_rec * r)
 {
 	child_rec * * p;
 
-	log(L_DEBUG,"Zapped memory for a child");
+	dbms_log(L_DEBUG,"Zapped memory for a child");
         for ( p = &children; *p && *p != r; )
                 p = &((*p)->nxt);
 
 	//if (*p == NULL)
-	//	log(L_ERROR,"Zapping unkown child ? children=%p",children);
+	//	dbms_log(L_ERROR,"Zapping unkown child ? children=%p",children);
 	assert( *p );
 
 	*p = r->nxt;
@@ -181,6 +180,14 @@ clean_children( void )
 	children=NULL;
 }
 
+/* Create a new child/thread. And then hand over the file descriptor of the current
+ * incoming connection.
+ *
+ * Return values:
+ *	ptr			child created; ptr to record with details.
+ *	null, errno = 0		we are the child.
+ *	noll, errno != 0	error occured.
+ */
 child_rec *
 create_new_child( void )
 {
@@ -190,8 +197,8 @@ create_new_child( void )
 	 */
 	int pipefd[2];
 	child_rec * child = NULL;
-	pid_t pid,mum;
-	log(L_INFORM,"Creating new child");
+	pid_t pid,this_pid;
+	dbms_log(L_INFORM,"Creating new child");
 
 	if ((socketpair(AF_UNIX, SOCK_STREAM,0,pipefd))<0)	
 		return NULL;
@@ -206,21 +213,22 @@ create_new_child( void )
 	used to solve this; but no longer with the new fork().
 */
 
-	mum=getpid();
+	this_pid=getpid();
 	pid=fork();
 	if (pid <0 ) {
-		log(L_ERROR,"Failed to create a child: %s",strerror(errno));
+		dbms_log(L_ERROR,"Failed to create a child: %s",strerror(errno));
 
 		return NULL;
 		} else
 	if (pid == 0) {
                 connection * r;
 		struct sigaction 	act,oact;
-		mum_pid = mum;
-		mum_fd = pipefd[1];
+		int mum_fd = pipefd[1];
+		mum_pid = this_pid;
+
 		close(pipefd[0]);
 
-		log(L_DEBUG,"Child created - I am the Child fd=%d",mum_fd);
+		dbms_log(L_DEBUG,"Child created - I am the Child fd=%d",mum_fd);
 
       		FD_CLR(sockfd,&allwset);
         	FD_CLR(sockfd,&allrset);
@@ -237,6 +245,7 @@ create_new_child( void )
 		sigaction(SIGPIPE,&act,&oact);
 
                 for(r=client_list; r; r=r->next) {
+			assert(r);
 			r->type = C_LEGACY;
 			r->close=1; MX;
 			};
@@ -252,7 +261,7 @@ create_new_child( void )
 		 * an init on; etc, etc.
 		 */
 		/* XXX no error trapping */
-		(void *) handle_new_connection(mum_fd,C_MUM);
+		mum = handle_new_local_connection(mum_fd,C_MUM);
 		} 
 	else {
 		/* for the mother.. 
@@ -260,26 +269,45 @@ create_new_child( void )
 		int childfd = pipefd[0];
 		close(pipefd[1]);
 
-		log(L_DEBUG,"Child created - I am the Mother fd=%d",childfd);
+		dbms_log(L_DEBUG,"Child created - I am the Mother fd=%d",childfd);
 
 #ifdef STATIC_BUFF
-		if ((child = free_child_list) == NULL )
+		/* If we still have free-ed children on the list
+		 * then use those.
+	         */
+		if (free_child_list) {
+			child = free_child_list;
+			free_child_list = free_child_list->nxt;
+			free_child_list_len --;
+		} else {
+			/* Increase the keep treshold if we have to malloc often. */
+			if (free_child_list_keep < free_child_list_max)
+				free_child_list_keep += 2;
+#else
+{
 #endif
-		if ( (child = (struct child_rec *) 
-			mymalloc(sizeof(struct child_rec))) == NULL )
+			child = (struct child_rec *) mymalloc(sizeof(struct child_rec));
+		}
+		if (child == NULL )
 				return NULL;
 
+		/* Tie into the list of active children. */
 		child ->nxt = children;
 		children = child;
-		child_counter ++;
 
+		/* For statistics and logging - no real reasons */
+		child_counter ++;
 		child->pid=pid;
+
+		/* Initalize the child 'real' structure */
 		child->r=NULL;
 		child->close=0;
 		child->num_dbs=0;
 
-		if ((child->r = handle_new_connection(childfd,C_CHILD)) == NULL) {
-			myfree(child);
+		/* And take over the connection. 
+		 */
+		if ((child->r = handle_new_local_connection(childfd,C_CHILD)) == NULL) {
+			free_child(child);
 			return NULL;
 			};
 		}
@@ -308,7 +336,7 @@ handoff_fd(
   struct cmsghdr * cmptr;
 
   assert(mum_pid == 0);
-  log(L_DEBUG, "Handoff fd=%d across on connection fd=%d to child",
+  dbms_log(L_DEBUG, "Handoff fd=%d across on connection fd=%d to child",
 	r ? r->clientfd : 0,
 	child->r ? child->r->clientfd : 0
 	);
@@ -342,7 +370,7 @@ handoff_fd(
 
   if (atomic_send(child->r->clientfd,&msg,
 	iov[0].iov_len + iov[1].iov_len + iov[2].iov_len    )<0) {
-  	log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
+  	dbms_log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
 		r->clientfd,child->r->clientfd,
 		strerror(errno));
 	return -1;
@@ -377,7 +405,7 @@ handoff_fd(
 
   if (atomic_send(child->r->clientfd, &msg, 
 	iov[0].iov_len  )<0) {
-  	log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
+  	dbms_log(L_DEBUG, "Handoff fd=%d on fd=%d Fail: %s",
 		r->clientfd,child->r->clientfd,
 		strerror(errno));
 	return -1;
@@ -389,9 +417,10 @@ handoff_fd(
    * we only mark; to avoid double close if it gets
    * re-used somehow.
    */
-  log(L_DEBUG, "Marking fd=%d ass closed",r->clientfd);
+  dbms_log(L_DEBUG, "Marking fd=%d ass closed",r->clientfd);
   r->close = 1; MX; 
   r->type = C_LEGACY;
+  zap(r);
   return  0;
 }
   
@@ -434,7 +463,9 @@ takeon_fd(int conn_fd)
   /* XXX message could be '0' in size !? */
   while(1) {
 	int e=recvmsg(conn_fd,&msg,0);
-	if ((e<0) && ((errno == EAGAIN) || (errno==EINTR)))
+	if ((e<0) && (errno == EAGAIN))
+		continue;
+	if ((e<=0) && (errno==EINTR))
 		continue;
 	if (e<0)
 		return -1;
@@ -442,27 +473,32 @@ takeon_fd(int conn_fd)
 	};
 		
   if ((cmptr=CMSG_FIRSTHDR(&msg)) == NULL ) {
-	log(L_ERROR,"Not the right msg struct");
-	return -1;
-	};
-
-  if ((cmptr->cmsg_type != SCM_RIGHTS) || ( cmptr->cmsg_level != SOL_SOCKET)) {
-	log(L_ERROR,"Not the right RIGHTS/SOCKED packed");
+	dbms_log(L_ERROR,"Not the right msg struct");
 	return -1;
 	};
 
    if (cmptr->cmsg_len != CMSG_LEN(sizeof(int))) {
-	log(L_ERROR,"Not the right length of fd struct %d",
+	dbms_log(L_ERROR,"Not the right length of fd struct %d",
 		cmptr->cmsg_len);
+	return -1;
+	};
+
+  if (cmptr->cmsg_type != SCM_RIGHTS)  {
+	dbms_log(L_ERROR,"Not the right SCM_RIGHTS passed");
+	return -1;
+	};
+
+  if ( cmptr->cmsg_level != SOL_SOCKET) {
+	dbms_log(L_ERROR,"Not the right SOL_SOCKET passed");
 	return -1;
 	};
 
   fd = *(int *)CMSG_DATA(cmptr);
 
   if (fd<0)
-	log(L_FATAL,"Negative value ? %d",fd);
+	dbms_log(L_FATAL,"Negative value ? %d",fd);
 
-  log(L_VERBOSE,"Received FD=%d",fd);
+  dbms_log(L_VERBOSE,"Received FD=%d",fd);
 
   /* this is going to be follwed by an INIT type of msg so we
    * kinda are not going to handle right here. (We could do it,

@@ -1,32 +1,37 @@
-RDFStore - TODO list
+RDFStore - TODO list - Sun Jun  9 23:58:35 CEST 2002
+----------------------------------------------------
+
+RDFStore indexing and searching
+
+* implement an even more general indexing algorithm which allows regular path expressions and
+  run RDQL queries direclty into the database --> pending (see RDFSTORE_CONNECTIONS_REINDEXING)
+* BRQL/RDQL joining and constraints; get it n*logn complex (get the properties hash codes)
+* align BRQL/RDQL to latest proposal
+* add regex library for the RDQL constraints part
+* provide rdfstore, rdfstoredump and rdfstoreadmin style of utilities
+* Jena, JRDF, PHP APIs
+* ordering for basic XSD subset
+* simple GEo point/box operators
 
 RDF Parsers
 
-* aboutEach and aboutEachPrefix
-* containers (see http://www-uk.hpl.hp.com/people/bwm/rdf/issues/containersyntax/current.htm)
-* integrate latest RDF-Core WG resolved issues (see http://www.w3.org/2000/03/rdf-tracking/#attention-developers)
-* write a new fast pure Perl RDF parser using regexs such as (T)REX (see also http://www.openhealth.org/RDF/RDFSurfaceSyntax)
-* N3 parser
-
-MagicTie
-
-* fix and finish ARRAY support
-* fix problems with implicit/auto-generated datastructures like $a->{b}->{c}
-* add rdfdb Data::MagicTie style
+* write pure C SAX/SAX2 C parser BSD licensed
+* write pure C N-Triples, Turtle, N3 parser BSD licensed
 
 DBMS
 
-* better testing and make it portable
+* b-tree support for rdf:datatype and other GEO operations
 
 RDF API
 
-* new indexing model using 3D sparse matrixes and RLE encoding
-* TIE interface over the whole RDFStore packages
-* think about integration with rdfapi_perl (see http://xml.jrc.it/rdfapi_perl/)
-* query API (SQUISH)
-* ultimate support SchemaModel
-* model versioning and change tracking
-* model timestamps (last modified, creation date)
-* serialisation of stored statements and models (not only Strawman)
+* TIE interface over the whole RDFStore packages --> partially doen with RDFStore::Object
+* intergate SchemaModel support into native store
 * mapping/cross-walking/dumb-down between models (schema) to achive soemthing liek $uri1=$uri2
-* start up a DAML set of modules to build generic things....
+* model versioning and change tracking
+* better context/provenance tracking
+
+Misc
+
+* Joseki interface
+* misc utils/ to insert, remove and update database
+* Dav style module to HTTP GET/POST RDFStore API and RDQL (also look at Joseki)

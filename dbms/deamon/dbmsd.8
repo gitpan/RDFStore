@@ -1,36 +1,23 @@
-.\" Copyright (c) 1998
-.\"   Dirk-Willem van Gulik / dirkx@webweaving.org
-.\"   Web Weaving Internet Engineering
+.\"\*
+.\"\*     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+.\"\*			     Dirk-Willem van Gulik <dirkx@webweaving.org>	
+.\"\*
+.\"\* NOTICE
+.\"\*
+.\"\* This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+.\"\* file you should have received together with this source code. If you did not get a
+.\"\* a copy of such a license agreement you can pick up one at:
+.\"\*
+.\"\*     http://rdfstore.sourceforge.net/LICENSE
+.\"\*
+.\"\* Perl 'tie' interface to a socket connection. Possibly to
+.\"\* the a server which runs a thin feneer to the Berkely DB.
+.\"\*
+.\"\* Based on DB_File, which came with perl and UKD which
+.\"\* came with CILS.
+.\"\*/
 .\"
-.\" Redistribution and use in source and binary forms, with or without
-.\" modification, are permitted provided that the following conditions
-.\" are met:
-.\" 1. Redistributions of source code must retain the above copyright
-.\"    notice, this list of conditions and the following disclaimer.
-.\" 2. Redistributions in binary form must reproduce the above copyright
-.\"    notice, this list of conditions and the following disclaimer in the
-.\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
-.\"    may be used to endorse or promote products derived from this software
-.\"    without specific prior written permission.
-.\"
-.\" THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
-.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
-.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
-.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
-.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-.\" SUCH DAMAGE.
-.\"
-.Dd August, 1998
+.Dd November, 2000
 .Dt DBMSD 8
 .Os
 .Sh NAME
@@ -46,6 +33,9 @@ server
 .Op Fl d
 .Op Fl d Arg dbase directory
 .Op Fl p Arg port number
+.Op Fl p Arg address to bind to
+.Op Fl c configfile
+.Op Fl C configfile
 .Op Fl U
 .Op Fl u userid or username
 .Sh DESCRIPTION
@@ -63,13 +53,21 @@ Just print the version number, and exit.
 Run in debug mode, does not fork, does not detatch.
 .It Fl t
 Simple command tracing; to stdout
-.It Fl d Args directory
+.It Fl d directory
 Specifies the prefix for the directory to create the *.db files in. When compiled
 with HASHING set; the
 .Nm dbmsd
 will in fact create another level of directories below this.
-.It Fl p Args port
+.It Fl p Arg port
 Specifies the port number.
+.It Fl b addresss
+Specifies the address to bind the server to. If none is specified the server will listen on
+all addresses (INADDR_ANY).
+.It Fl c configfile
+Use spefified config file (use the -v flag to see default config file). Or use '-' for stdin.
+.It Fl C configfile
+Check the specified config file and exit immediately with ok/not-ok. See also 
+,Xref 8 dbmscheckconf
 .It Fl u userid or username.
 Specifies as which user the dbm(s) will be accesses. For sanity
 and security reasons, the server

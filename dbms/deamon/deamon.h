@@ -1,64 +1,27 @@
-/* $Id: deamon.h,v 1.2 2001/06/18 15:26:18 reggiori Exp $
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
-
-#include "dbms.h"
-
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
+ *
+ * NOTICE
+ *
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
+ *
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: deamon.h,v 1.12 2004/08/19 18:57:36 areggiori Exp $
+ */ 
 #ifndef _H_DEAMON
 #define _H_DEAMON
 
-#if defined(BSD)
-#define _HAS_TIME_T
-#define _HAS_SENSIBLE_SPRINTF
-#endif
+#include "dbms.h"
+#include "conf.h"
+#include "dbms_comms.h"
 
-#if defined(_HAS_TIMESPEC)
-#define TIMESPEC struct timespec
-#endif
-
-#if defined(_HAS_TIMESTRUC_T)
-#define TIMESPEC timestruc_t
-#endif
-
-#if defined(_HAS_TIME_T)
-#define TIMESPEC time_t
-#endif
-
-#if defined(_HAS_SENSIBLE_SPRINTF)
-#define STRLEN(x) (x)
-#endif
-
-#if defined(_HAS_SILLY_SPRINTF)
-#define STRLEN(x) strlen(x)
-#endif
-            
-#ifdef DEBUG
-#ifdef TIME_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
 extern float total_time;
 
 #define MDEBUG( x ) {  \
@@ -101,8 +64,10 @@ typedef struct dbase {
 	char	* pfile;
 	char 	* name;
 #endif
-	char    * my_dir;
 	DB	* handle;
+#ifdef DB_VERSION_MAJOR
+        DBC *   cursor ;
+#endif
 	int	  lastfd; /* last FD from which a cursor was set */
 	int	  num_cls; /* Number of Clients served */
 	struct dbase   * nxt;
@@ -114,31 +79,22 @@ typedef struct connection {
    int	type; /* one of C_MUM, C_CHILD, ... */
 
 	int      clientfd;
-	char	*	my_dir;
 
 	struct sockaddr_in address;
 
 	DBT	v1;
 	DBT	v2;
 
-#ifdef STATIC_CS_BUFF
-	char	sendbuff[ MAX_CS_PAYLOAD ];
-#else
 	char	* sendbuff;
-#endif
-
-#ifdef STATIC_SC_BUFF
-	char	recbuff[ MAX_SC_PAYLOAD ];
-#else
 	char 	* recbuff;
-#endif
 
 	struct dbase	* dbp;
 
 	struct header	cmd;
 	struct iovec 	iov[3];
 	struct msghdr	 msg;
-	
+
+	tops		op;	/* Max operation allowed */
 	int	   	send;	/* size of the outgoing block */
 	int	   	tosend;	/* bytes send sofar.. */
 
@@ -157,6 +113,7 @@ typedef struct command_req {
 	char * info;
 	int cnt;
         void (*handler)(connection * r);
+	tops op;
         } command_req;
 
 extern struct command_req cmd_table[ TOKEN_MAX ];
@@ -170,7 +127,7 @@ extern struct command_req cmd_table[ TOKEN_MAX ];
 #define	L_DEBUG 	4
 
 void reply_log(connection * r, int level, char *fmt, ...);
-void log(int level, char *fmt, ...);
+void dbms_log(int level, char *fmt, ...);
 void trace(char *fmt, ...);
 
 extern int debug,verbose,trace_on;
@@ -193,7 +150,7 @@ void zap_child( child_rec * r);
 #endif
 
 void close_connection ( connection * r );
-//void free_connection ( connection * r );
+void free_connection ( connection * r );
 void continue_send( connection * r );
 void final_read( connection * r) ;
 void initial_read( connection * r );

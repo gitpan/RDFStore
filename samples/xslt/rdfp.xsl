@@ -18,7 +18,7 @@
 	xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
 	xmlns:xlink="http://www.w3.org/1999/xlink"
 	exclude-result-prefixes='xsl rdf rdfs rdfp xlink'>
-<!-- an RDF parser in XSLTfor now, just the basic RDF syntax per2.2.1. Basic Serialization Syntaxofhttp://www.w3.org/TR/1999/REC-rdf-syntax-19990222$Id: rdfp.xsl,v 1.1.1.1 2001/01/18 09:53:23 reggiori Exp $-->
+<!-- an RDF parser in XSLTfor now, just the basic RDF syntax per2.2.1. Basic Serialization Syntaxofhttp://www.w3.org/TR/1999/REC-rdf-syntax-19990222$Id: rdfp.xsl,v 1.1.1.1 2002/06/17 09:30:52 areggiori Exp $-->
   <xsl:output method='xml' version="1.0" indent='yes'/>
   <xsl:variable name='rdfNS' select='"http://www.w3.org/1999/02/22-rdf-syntax-ns#"'/>
   <xsl:variable name='rdfsNS' select='"http://www.w3.org/2000/01/rdf-schema#"'/>  

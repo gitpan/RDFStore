@@ -1,25 +1,41 @@
-#
+# *
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
+# *
+# * NOTICE
+# *
+# * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+# * file you should have received together with this source code. If you did not get a
+# * a copy of such a license agreement you can pick up one at:
+# *
+# *     http://rdfstore.sourceforge.net/LICENSE
+# *
+# * 
 TFILE=dbms-`date +%Y-%m-%d`
 
 all: 
 	( cd deamon; make )
-	( cd DBMS; perl Makefile.PL && make )
+	( cd libdbms; make )
+	( cd client; perl Makefile.PL && make )
 
-tar:
-	if [ -f DBMS/Makefile ] ; then ( cd DBMS; make clean ); fi
+tar:	clean
+	if [ -f client/Makefile ] ; then ( cd client; make realclean ); fi
 	( cd deamon; make clean )
 	mkdir -p ../$(TFILE) 
 	cp -r . ../$(TFILE)
 	cd ..
 	tar zcf $(TFILE).tar.gz $(TFILE)
 
+test:
+	( cd deamon; make test )
+
 clean:
 	( cd deamon; make clean )
-	( cd DBMS; perl Makefile.PL && make clean; rm *.old )
+	( cd libdbms; make clean )
+	( cd client; make realclean )
 
 install: all
 	( cd deamon; make install )
-	( cd DBMS; make install )
 
 depend:
 	( cd deamon; make depend )

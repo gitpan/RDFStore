@@ -1,42 +1,22 @@
-/* DBMS Server
- * $Id: handler.c,v 1.2 2001/06/18 15:26:18 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Web Weaving Internet Engineering
- *     Dirk-Willem van Gulik / dirkx@webweaving.org
+ * NOTICE
  *
- * based on UKDCils
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-/*#include <sys/syslimits.h>*/
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: handler.c,v 1.43 2004/08/19 18:57:36 areggiori Exp $
+ */ 
 
 #include "dbms.h"
+#include "dbms_comms.h"
+#include "dbms_compat.h"
 #include "dbmsd.h"
 
 #include "deamon.h"
@@ -46,6 +26,15 @@
 #include "pathmake.h"
 
 dbase                 * first_dbp = NULL;
+
+#ifdef STATIC_BUFF
+static dbase * free_dbase_list = NULL;
+static int free_dbase_list_len = 0;
+static int free_dbase_list_keep = 2;
+static int free_dbase_list_max = 8;
+#endif
+static int dbase_counter = 0;
+
 
 char * iprt( DBT * r ) {
         static char tmp[ 128 ]; int i;
@@ -81,35 +70,44 @@ char * eptr( int i ) {
 		return "Fail ";
 	}
 
-#ifdef STATIC_BUFF
-static dbase * free_dbase_list = NULL;
+static int _dbclose(dbase *q)
+{
+	if ((q->handle->sync)(q->handle,0)) 
+		return -1;
+
+#ifdef DB_VERSION_MAJOR
+	if (	(q->cursor->c_close(q->cursor)) ||
+	   	((q->handle->close)(q->handle, 0)) )
+#else
+	if ((q->handle->close)(q->handle))
 #endif
-static int dbase_counter = 0;
+		return -1;
+	return 0;
+}
 
 void
 free_dbs(
 	dbase * q
 	)
 {
-	if (q->handle) {
-	   if ((q->handle->sync)(q->handle,0)) 
-		log(L_ERROR,"Sync(%s) returned an error prior to close",
-			q->name); 
-	   if ((q->handle->close)(q->handle))
-		log(L_ERROR,"Sync(%s) returned an error prior to close",
-			q->name); 
-	}
+	if ((q->handle) && (_dbclose(q)))
+			dbms_log(L_ERROR,"Sync/Close(%s) returned an error during closing of db", q->name); 
+
+#ifdef STATIC_BUFF
+	if (free_dbase_list_len < free_dbase_list_keep) {
+		q->nxt = free_dbase_list;
+		free_dbase_list = q;	
+		free_dbase_list_len ++;
+	} else 
+#endif
+        	myfree(q);
+
 #ifndef STATIC_BUFF
-        if (q->pfile) myfree(q->pfile);
-        if (q->name) myfree(q->name);
-        myfree(q);
-#else
-	/* pre-fix into free DBS list */
-	q->nxt = free_dbase_list;
-	free_dbase_list = q;	
+	if (q->pfile) myfree(q->pfile);
+       	if (q->name) myfree(q->name);
 #endif
 	dbase_counter --;
-        };
+};
 
 void
 zap_dbs (
@@ -126,7 +124,7 @@ zap_dbs (
                 p = &((*p)->nxt);
 
         if ( *p == NULL) {
-                log(L_ERROR,"DBase to zap not found");
+                dbms_log(L_ERROR,"DBase to zap not found");
                 return;
                 };
 
@@ -175,41 +173,192 @@ int open_dbp( dbase * p ) {
  	 * XXX we could also pass a &priv=NULL pointer to let the DB's work this
 	 * one out..
 	 */
-        p->handle = 
-		dbopen( p->pfile, O_RDWR | p->mode, 0666, DB_HASH, NULL);
 
-        return (p->handle != NULL) ? 0 : errno;
+#ifdef BERKELEY_DB_1_OR_2 /* Berkeley DB Version 1  or 2 */
+
+#ifdef DB_VERSION_MAJOR
+	if (    (db_open(	p->pfile, 
+        			DB_BTREE,
+				DB_CREATE, /* only create it should be ((ro==0) ? ( DB_CREATE ) : ( DB_RDONLY ) ) */
+                                0666, NULL, NULL, &p->handle )) ||
+#if DB_VERSION_MAJOR == 2 && DB_VERSION_MINOR < 6
+                ((p->handle->cursor)(p->handle, NULL, &p->cursor))
+#else
+                ((p->handle->cursor)(p->handle, NULL, &p->cursor, 0))
+#endif
+                ) {
+#else
+
+#if defined(DB_LIBRARY_COMPATIBILITY_API) && DB_VERSION_MAJOR > 2
+	if (!(p->handle = (DB *)__db185_open(	p->pfile, 
+						p->mode,
+                                                0666, DB_BTREE, NULL ))) {
+#else
+	if (!(p->handle = (DB *)dbopen(	p->pfile, 
+					p->mode,
+                                        0666, DB_BTREE, NULL ))) {
+#endif /* DB_LIBRARY_COMPATIBILITY_API */
+
+#endif
+
+#else /* Berkeley DB Version > 2 */
+	if (    (db_create(&p->handle, NULL,0)) ||
+        	(p->handle->open(	p->handle,
+#if DB_VERSION_MAJOR >= 4 && DB_VERSION_MINOR > 0 && DB_VERSION_PATCH >= 17
+					NULL,
+#endif
+                                	p->pfile, 
+                                	NULL,
+                                	DB_BTREE, 
+					DB_CREATE, /* only create it should be ((ro==0) ? ( DB_CREATE ) : ( DB_RDONLY ) ) */
+                                	0666 )) ||
+                ((p->handle->cursor)(p->handle, NULL, &p->cursor, 0)) ) {
+#endif /* Berkeley DB Version > 2 */
+
+		return errno;
+		};
+
+	return 0;
         }
 
 
-dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
+dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, DBT * v2 ) {
         dbase * p;
 	char * pfile;
+	char name[ 255 ], *n, *m;
+	int i;
+	int mode = 0;
+	tops mops = T_NONE;
 
-	/* XXX this should be a HASH ! 
+	/* Clean up the name */
+	bzero(name,sizeof(name));
+	for(m = (unsigned char *)(v2->data),n=name,i=0;i<v2->size && i<sizeof(name)-1;i++) 
+		if (isalnum((int)(m[i]))) *n++ = m[i];
+	*n='\0';
+
+	r->op = allowed_ops_on_dbase(r->address.sin_addr.s_addr, name);
+        dbms_log(L_DEBUG,"Permissions for %s/%s - %s",
+		name, inet_ntoa(r->address.sin_addr),op2string(r->op));
+
+	switch(xsmode) {
+	case DBMS_XSMODE_RDONLY: 
+		mops = T_RDONLY;
+		mode = O_RDONLY;
+		break;
+		;;
+	case DBMS_XSMODE_RDWR: 
+		mops = T_RDWR;
+		mode = O_RDWR;
+		break;
+		;;
+	case DBMS_XSMODE_CREAT: 
+		mops = T_CREAT;
+		mode = O_RDWR | O_CREAT;
+		break;
+		;;
+	case DBMS_XSMODE_DROP: 
+		mops = T_DROP;
+		mode = O_RDWR | O_CREAT;
+		break;
+	default:
+		dbms_log(L_ERROR,"Impossible XSmode(bug) %d requed on %s",
+			xsmode,name);
+		return NULL;
+		break;
+	}
+
+	if (mops > r->op) {
+		char * ip = strdup(inet_ntoa(r->address.sin_addr));
+                dbms_log(L_ERROR,"Access violation on %s: %s requested %s - but may up to %s",
+			name, ip, op2string(mops),op2string(r->op));
+		free(ip);
+		return NULL;
+	};
+
+	/* Max allowed operation */
+	r->op = MIN(mops,r->op);
+        dbms_log(L_DEBUG,"Permissions for %s/%s - asked %s - granted %s",
+		name, inet_ntoa(r->address.sin_addr),op2string(mops),
+		op2string(r->op));
+
+#if 0
+	/* We always add a RDWR to the open - as it may be the case
+	 * that some later connection needs RW. XXX fixme.
 	 */
-        for ( p = first_dbp; p; p=p->nxt) 	
-		if ( (p->sname == v2->size) &&
-                    (bcmp(p->name,v2->data,p->sname)==0) &&
-		    (strcmp( r->my_dir, p->my_dir )==0)
-                ) return p;
+	mode = ( mode & (~ O_RDONLY)) | O_RDWR;
+#endif
+
+#ifndef RDFSTORE_PLATFORM_SOLARIS
+#ifndef RDFSTORE_PLATFORM_LINUX
+	/* Try to get an exclusive lock if possible */
+	mode |= O_EXLOCK;
+#endif
+#endif
+
+        for ( p = first_dbp; p; p=p->nxt)
+		if (strcmp(p->name,name)==0) {
+			int oldmode = p->mode;
+
+			/* If the database already has the perm's we need - simply
+			 * return it. If we are foring - and this is not the process
+			 * really handling the database - then ignore all this
+			 */
+			if ((((p->mode) & mode) == mode )
+#ifdef FORKING
+				|| (!mum_pid) 
+#endif
+			) return p;
+
+			/* we need to (re)open the database with the higher level perm's we
+			 * we need this time.. 
+			 */
+			p->mode = mode;
+			if (_dbclose(p) || open_dbp( p )) {
+                		dbms_log(L_ERROR,
+					"DBase %s could not be be reopened with the right permissions %d",
+					p->name,p->mode);
+				/* try to reopen the dbase with the old permissions
+				 * (for the other connections still active)
+				 */
+				p->mode = oldmode;
+
+				/* bail out - but not clean up de *p; as other
+				 * connections are still using it.
+				 */
+				if (open_dbp(p)) 
+               				 return NULL;
+					
+				/* give up - and have the DB removed (even for
+				 * 	the other connections ! */	
+				goto err_and_exit;
+			}
+			return p;
+	}
 
 	if (dbase_counter > HARD_MAX_DBASE) {
-                log(L_ERROR,"Hard max number of dabases hit. (bug?)");
+                dbms_log(L_ERROR,"Hard max number of dabases hit. (bug?)");
                 return NULL;
                 };
 
 #ifdef STATIC_BUFF
-	if ((p = free_dbase_list) == NULL)
+	if (free_dbase_list)
+	{
+		p = free_dbase_list;
+		free_dbase_list = free_dbase_list->nxt;
+	} else {
+		if (free_dbase_list_keep < free_dbase_list_max)
+			free_dbase_list_keep += 2;
+#else
+{
 #endif
-        if ((p = mymalloc(sizeof(dbase))) == NULL) {
-                log(L_ERROR,"No Memory (for another dbase 1)");
-                return NULL;
-                };
+        	p = mymalloc(sizeof(dbase));
+	}
 
-#ifdef STATIC_BUFF
-	free_dbase_list = p->nxt;
-#endif
+	if (p == NULL) {
+               	dbms_log(L_ERROR,"No Memory (for another dbase 1)");
+        	return NULL;
+	};
+	bzero(p,sizeof(dbase));
         p->nxt = first_dbp;
         first_dbp = p;
 	dbase_counter ++;
@@ -225,7 +374,6 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 	p->close = 0;
 	p->mode = mode;
         p->sname = v2->size;
-	p->my_dir = r->my_dir;
 	p->handle = NULL;
 
 #ifdef FORKING
@@ -235,17 +383,16 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 #ifdef STATIC_BUFF
 	if ( 1+ v2->size > MAX_STATIC_NAME ) 
 #else
-   if ((p->name = mymalloc( 1+v2->size ))==NULL) 
+	if ((p->name = mymalloc( 1+v2->size ))==NULL) 
 #endif
 	{
-                log(L_ERROR,"No Memory (for another dbase 2)");
+                dbms_log(L_ERROR,"No Memory (for another dbase 2)");
 		goto clean_and_exit;
                 };
 
-        strncpy( p->name, v2->data, v2->size );
-	p->name[ v2->size ] = '\0';
+        strcpy(p->name, name);
 
-	if (!(pfile= mkpath(p->my_dir,p->name)))
+	if (!(pfile= mkpath(my_dir,p->name)))
 		goto clean_and_exit;
 
 #ifdef STATIC_BUFF
@@ -254,21 +401,23 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
    if ((p->pfile = mymalloc(strlen(pfile)+1)) == NULL )
 #endif
 	{ 
-                log(L_ERROR,"No Memory (for another dbase 3)");
+                dbms_log(L_ERROR,"No Memory (for another dbase 3)");
 		goto clean_and_exit;
                 };
 	strcpy(p->pfile,pfile);
 
-	/* if you do NOT want it created, it MUST exist, otherwise
-	 * we send back an error...
+	/* Check if the DB exists unless we are on an allowed
+	 * create operations level.
 	 */
-	if ( (mode & O_CREAT) == 0) {
+	if (r->op < T_CREAT) {
 		struct stat sb;
 		int s=stat(p->pfile,&sb);
-		log(L_INFORM,"Statting %s -> %d",p->pfile,s);
-		if (s==-1) 
+		if (s==-1) {
+			dbms_log(L_ERROR,"DB %s not found\n",p->pfile);
 			goto clean_and_exit;
-		};
+		}
+		/* DB exists - we are good. */
+	};
 		
 #ifdef FORKING
 	/* if we are the main process, then pass
@@ -306,15 +455,17 @@ dbase * get_dbp (connection *r, int mode, DBT * v2 ) {
 
 		p->handled_by = best;
 		p->handled_by->num_dbs ++;
+
 		return p;	
-		}; /* if mother */
+	}; /* if mother */
 	/* we are a child... just open normal. 
 	 */
 #endif
         if (open_dbp( p ) == 0) 
 		return p;
 
-	log(L_ERROR,"Open1 %s failed: %s",p->pfile,strerror(errno));
+err_and_exit:
+	dbms_log(L_ERROR,"open_dbp(1) %s(mode %d) failed: %s",p->pfile,p->mode,strerror(errno));
 
 clean_and_exit:
 	p->close = 1; MX;
@@ -331,17 +482,19 @@ clean_and_exit:
 #endif
 	dbase_counter --;
 	return NULL;
-        }
+}
 
 void do_init( connection * r) {
 	DBT val;
 	u_long proto;
-	u_long mode;
+	dbms_xsmode_t xsmode;
+
+        memset(&val, 0, sizeof(val));
 
 	val.data = &proto;
 	val.size = sizeof( u_long );
 
-	mode =htonl( ((u_long *)(r->v1.data))[1] );
+	xsmode = (dbms_xsmode_t)((u_long) ntohl( ((u_long *)(r->v1.data))[1] ));
 
 #ifdef FORKING
 	assert(mum_pid==0);
@@ -351,9 +504,8 @@ void do_init( connection * r) {
 		return;
 		};
 
-
 	proto =((u_long *)(r->v1.data))[0];
-	if ( htonl(proto) != DBMS_PROTO ) {
+	if ( ntohl(proto) != DBMS_PROTO ) {
 		reply_log(r,L_ERROR,"Protocol not supported");
 		return;
 		};
@@ -361,11 +513,11 @@ void do_init( connection * r) {
 	/* work out wether we have this dbase already open, 
 	 * and open it if ness. 
 	 */
-	r->dbp = get_dbp( r, mode, &(r->v2)); /* returns NULL on error or if it is a child */
+	r->dbp = get_dbp( r, xsmode, &(r->v2)); /* returns NULL on error or if it is a child */
 
 	if (r->dbp == NULL) {
 		if (errno == ENOENT) {
-			log(L_DEBUG,"Closing instantly with a not found");
+			dbms_log(L_DEBUG,"Closing instantly with a not found");
 			dispatch(r, TOKEN_INIT | F_NOTFOUND,&val,NULL);
 			return;
 			};
@@ -379,9 +531,18 @@ void do_init( connection * r) {
 
 	r->dbp->num_cls ++;
 #ifdef FORKING
+{
+	/* We -also- need to record some xtra things which are lost acrss the connection. */
+	u_long extra[3];
+	extra[0] = ((u_long *)(r->v1.data))[0];
+	extra[1] = ((u_long *)(r->v1.data))[1];
+	extra[2] = r->address.sin_addr.s_addr;
+	r->v1.data = extra;
+	r->v1.size = sizeof(extra);
 	if (handoff_fd(r->dbp->handled_by, r)) 
 		reply_log(r,L_ERROR,"handoff %s : %s",
 				r->dbp->name,strerror(errno));
+}
 #else
 	dispatch(r, TOKEN_INIT | F_FOUND,&val,NULL);
 #endif
@@ -401,12 +562,17 @@ void do_pass( connection * mums_r) {
 	 */
 	connection * r;
 	int newfd;
-	u_long proto,mode;
+	u_long proto;
+	dbms_xsmode_t xsmode;
 	DBT val;
+
+        memset(&val, 0, sizeof(val));
+	assert(mums_r->v1.size = 3*sizeof(u_long));
+	mums_r->address.sin_addr.s_addr = ((u_long *)(mums_r->v1.data))[2];
 
 	assert(mum_pid);
 
-	if ((newfd=takeon_fd(mum_fd))<0) {
+	if ((newfd=takeon_fd(mum->clientfd))<0) {
 		reply_log(mums_r,L_ERROR,"Take on failed: %s",
 			strerror(errno));
 		/* give up on the connection to mum ?*/
@@ -418,21 +584,21 @@ void do_pass( connection * mums_r) {
 	 * whatever error moaning itself.
 	 */
 	proto =((u_long *)(mums_r->v1.data))[0];
-	mode = htonl(((u_long *)(mums_r->v1.data))[1]);
+	xsmode = (dbms_xsmode_t)((u_long) htonl(((u_long *)(mums_r->v1.data))[1]));
 
-	log(L_INFORM,"PASS db='%s' mode %d",iprt(&(mums_r->v2)),mode);
+	dbms_log(L_INFORM,"PASS db='%s' mode %d",iprt(&(mums_r->v2)),xsmode);
 
-	if ((r = handle_new_connection( newfd, C_CLIENT)) == NULL)
+	if ((r = handle_new_connection( newfd, C_CLIENT, mums_r->address)) == NULL)
 		return;
 
 	/* is this the sort of init data we can handle ? 
 	 */
-	if ( htonl(proto) != DBMS_PROTO ) {
+	if ( ntohl(proto) != DBMS_PROTO ) {
 		reply_log(r,L_ERROR,"Protocol not supported");
 		return;
 		};
-
-	r->dbp = get_dbp( r, mode, &(mums_r->v2));
+	
+	r->dbp = get_dbp( r, xsmode, &(mums_r->v2));
 
 	if (r->dbp== NULL) {
 		if (errno == ENOENT) {
@@ -455,7 +621,7 @@ void do_pass( connection * mums_r) {
 
 	dispatch(r, TOKEN_INIT | F_FOUND,&val,NULL);
 
-	log(L_INFORM,"PASS send init repy on %d to client",r->clientfd);
+	dbms_log(L_INFORM,"PASS send init repy on %d to client",r->clientfd);
 	return;
 	};
 #endif
@@ -464,25 +630,37 @@ void do_fetch( connection * r) {
 	DBT key, val;
 	int err;
 
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command FETCH");
+		dbms_log(L_ERROR,"Command received from non-client command FETCH");
 		return;
 		};
 
 	key.data = r->v1.data;
 	key.size = r->v1.size;
 
-
-	err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#ifdef DB_VERSION_MAJOR
+	err=(r->dbp->handle->get)(r->dbp->handle, NULL, &key, &val, 0);
+#else
+	err=(r->dbp->handle->get)(r->dbp->handle, &key, &val, 0);
+#endif
 
 	if (err == 0) 
 		dispatch(r,TOKEN_FETCH | F_FOUND,&key,&val);
 	else 
+#ifdef DB_VERSION_MAJOR
+	if (err == DB_NOTFOUND)
+#else
 	if (err == 1)
+#endif
 		dispatch(r,TOKEN_FETCH | F_NOTFOUND,NULL,NULL);
-	else
-		reply_log(r,L_ERROR,"fetch on %s failed: %s",r->dbp->name,strerror(errno));
-	};
+	else {
+		errno=err;
+		reply_log(r,L_ERROR,"fetch on %s failed: %s (klen=%d, vlen=%d, err=%d(1))",r->dbp->name,strerror(errno), key.size,val.size,err);
+		}
+	}
 
 void do_inc ( connection * r) {
 	DBT key, val;
@@ -491,8 +669,11 @@ void do_inc ( connection * r) {
 	char * p;
 	char outbuf[256]; /* surely shorter than UMAX_LONG */
 
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command FETCH");
+		dbms_log(L_ERROR,"Command received from non-client command FETCH");
 		return;
 		};
 
@@ -502,14 +683,25 @@ void do_inc ( connection * r) {
 	key.data = r->v1.data;
 	key.size = r->v1.size;
 
+#ifdef DB_VERSION_MAJOR
+	err=(r->dbp->handle->get)( r->dbp->handle, NULL, &key, &val, 0);
+#else
 	err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#endif
 
+#ifdef DB_VERSION_MAJOR
+	if ((err == DB_NOTFOUND) || (val.size == 0)) {
+#else
 	if ((err == 1) || (val.size == 0)) {
+#endif
                 dispatch(r,TOKEN_INC | F_NOTFOUND,NULL,NULL);
 		return;
 		}
 	else
 	if (err) {
+#ifdef DB_VERSION_MAJOR
+		errno=err;
+#endif
 		reply_log(r,L_ERROR,"inc on %s failed: %s",r->dbp->name,
 			strerror(errno) );
 		return;
@@ -543,69 +735,391 @@ void do_inc ( connection * r) {
          *	on success, and 1 if the R_NOOVERWRITE flag was set
          *    	and the key already exists in the file.
 	 */
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->put)( r->dbp->handle, NULL, &key, &val, 0);
+#else
         err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
+#endif
 
 	/* just send it back as an ascii string
 	 */
+#ifdef DB_VERSION_MAJOR
+	if (( err == 0 ) || ( err < 0 ))
+#else
 	if (( err == 0 ) || ( err == 1 ))
+#endif
                 dispatch(r,TOKEN_INC | F_FOUND,NULL,&val);
-        else
+        else {
+#ifdef DB_VERSION_MAJOR
+		errno=err;
+#endif
 		reply_log(r,L_ERROR,"inc store on %s failed: %s",
 			r->dbp->name,strerror(errno));
+		};
+	};
+
+void do_dec ( connection * r) {
+	DBT key, val;
+	int err;
+	unsigned long l;
+	char * p;
+	char outbuf[256]; /* surely shorter than UMAX_LONG */
+
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
+	if (r->type != C_CLIENT) {
+		dbms_log(L_ERROR,"Command received from non-client command FETCH");
+		return;
+		};
+
+	/* all we get from the client is the key, and
+	 * all we return is the (decreased) value
+	 */
+	key.data = r->v1.data;
+	key.size = r->v1.size;
+
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->get)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#endif
+
+#ifdef DB_VERSION_MAJOR
+        if ((err == DB_NOTFOUND) || (val.size == 0)) {
+#else
+        if ((err == 1) || (val.size == 0)) {
+#endif
+                dispatch(r,TOKEN_DEC | F_NOTFOUND,NULL,NULL);
+                return;
+                }
+        else
+        if (err) {
+#ifdef DB_VERSION_MAJOR
+                errno=err;
+#endif
+                reply_log(r,L_ERROR,"dec on %s failed: %s",r->dbp->name,
+                        strerror(errno) );
+                return;
+                };
+
+	/* XXX bit of a hack; but perl seems to deal with
+         *     all storage as ascii strings in some un-
+         *     specified locale.
+         */
+	bzero(outbuf,256);
+	strncpy(outbuf,val.data,MIN( val.size, 255 ));
+	l=strtoul( outbuf, &p, 10 );
+
+	if (*p || l == ULONG_MAX || l == 0 || errno == ERANGE) {
+		reply_log(r,L_ERROR,"dec on %s failed: %s",r->dbp->name,
+			"Not the (entire) string is an unsigned integer"
+			);
+		return;
+		};
+	/* this is where it all happens... */
+	l--;
+
+	bzero(outbuf,256);
+	snprintf(outbuf,255,"%lu",l);
+	val.data = & outbuf;
+	val.size = strlen(outbuf);
+	
+	/* and put it back.. 
+	 *
+ 	 *  	Put routines return -1 on error (setting errno),  0
+         *	on success, and 1 if the R_NOOVERWRITE flag was set
+         *    	and the key already exists in the file.
+	 */
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->put)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
+#endif
+
+        /* just send it back as an ascii string
+         */
+#ifdef DB_VERSION_MAJOR
+        if (( err == 0 ) || ( err < 0 ))
+#else
+        if (( err == 0 ) || ( err == 1 ))
+#endif
+                dispatch(r,TOKEN_DEC | F_FOUND,NULL,&val);
+        else
+#ifdef DB_VERSION_MAJOR
+		{
+                errno=err;
+                reply_log(r,L_ERROR,"dec store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+		};
+#else
+                reply_log(r,L_ERROR,"dec store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+#endif
+	};
+
+/* atomic packed increment */
+void do_packinc ( connection * r) {
+	DBT key, val;
+	int err;
+	dbms_counter l=0;
+	unsigned char outbuf[256];
+
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
+	if (r->type != C_CLIENT) {
+		dbms_log(L_ERROR,"Command received from non-client command FETCH");
+		return;
+		};
+
+	/* all we get from the client is the key, and
+	 * all we return is the (increased) value
+	 */
+	key.data = r->v1.data;
+	key.size = r->v1.size;
+
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->get)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#endif
+
+#ifdef DB_VERSION_MAJOR
+        if ((err == DB_NOTFOUND) || (val.size == 0)) {
+#else
+        if ((err == 1) || (val.size == 0)) {
+#endif
+                dispatch(r,TOKEN_PACKINC | F_NOTFOUND,NULL,NULL);
+                return;
+                }
+        else
+        if (err) {
+#ifdef DB_VERSION_MAJOR
+                errno=err;
+#endif
+                reply_log(r,L_ERROR,"packinc on %s failed: %s",r->dbp->name,
+                        strerror(errno) );
+                return;
+                };
+
+	l = ntohl(*(dbms_counter *)val.data);
+
+	/* this is where it all happens... */
+	l++;
+
+        val.data = outbuf;
+        val.size = sizeof(dbms_counter);
+
+	*(dbms_counter *)val.data = htonl(l);
+
+	/* and put it back.. 
+	 *
+ 	 *  	Put routines return -1 on error (setting errno),  0
+         *	on success, and 1 if the R_NOOVERWRITE flag was set
+         *    	and the key already exists in the file.
+	 */
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->put)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
+#endif
+
+        /* just send it back as an ascii string
+         */
+#ifdef DB_VERSION_MAJOR
+        if (( err == 0 ) || ( err < 0 ))
+#else
+        if (( err == 0 ) || ( err == 1 ))
+#endif
+                dispatch(r,TOKEN_PACKINC | F_FOUND,NULL,&val);
+        else
+#ifdef DB_VERSION_MAJOR
+		{
+                errno=err;
+                reply_log(r,L_ERROR,"packinc store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+		};
+#else
+                reply_log(r,L_ERROR,"packinc store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+#endif
+	};
+
+/* atomic packed decrement */
+void do_packdec ( connection * r) {
+	DBT key, val;
+	int err;
+	dbms_counter l=0;
+	unsigned char outbuf[256]; /* surely shorter than UMAX_LONG */
+
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
+	if (r->type != C_CLIENT) {
+		dbms_log(L_ERROR,"Command received from non-client command FETCH");
+		return;
+		};
+
+	/* all we get from the client is the key, and
+	 * all we return is the (increased) value
+	 */
+	key.data = r->v1.data;
+	key.size = r->v1.size;
+
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->get)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#endif
+
+#ifdef DB_VERSION_MAJOR
+        if ((err == DB_NOTFOUND) || (val.size == 0)) {
+#else
+        if ((err == 1) || (val.size == 0)) {
+#endif
+                dispatch(r,TOKEN_PACKDEC | F_NOTFOUND,NULL,NULL);
+                return;
+                }
+        else
+        if (err) {
+#ifdef DB_VERSION_MAJOR
+                errno=err;
+#endif
+                reply_log(r,L_ERROR,"packdec on %s failed: %s",r->dbp->name,
+                        strerror(errno) );
+                return;
+                };
+
+	l = ntohl(*(dbms_counter *)val.data);
+	/* this is where it all happens... */
+	l--;
+
+
+        val.data = outbuf;
+        val.size = sizeof(uint32_t)+1;
+
+	*(dbms_counter *)val.data = htonl(l);
+
+	/* and put it back.. 
+	 *
+ 	 *  	Put routines return -1 on error (setting errno),  0
+         *	on success, and 1 if the R_NOOVERWRITE flag was set
+         *    	and the key already exists in the file.
+	 */
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->put)( r->dbp->handle, NULL, &key, &val, 0);
+#else
+        err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
+#endif
+
+        /* just send it back as an ascii string
+         */
+#ifdef DB_VERSION_MAJOR
+        if (( err == 0 ) || ( err < 0 ))
+#else
+        if (( err == 0 ) || ( err == 1 ))
+#endif
+                dispatch(r,TOKEN_PACKDEC | F_FOUND,NULL,&val);
+        else
+#ifdef DB_VERSION_MAJOR
+		{
+                errno=err;
+                reply_log(r,L_ERROR,"packdec store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+		};
+#else
+                reply_log(r,L_ERROR,"packdec store on %s failed: %s",
+                        r->dbp->name,strerror(errno));
+#endif
 	};
 
 void do_exists( connection * r) {
         DBT key, val;
         int err;
 
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command EXISTS");
+		dbms_log(L_ERROR,"Command received from non-client command EXISTS");
 		return;
 		};
 
         key.data = r->v1.data;
         key.size = r->v1.size;
 
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->get)( r->dbp->handle, NULL, &key, &val, 0);
+#else
         err=(r->dbp->handle->get)( r->dbp->handle, &key, &val,0);
+#endif
 
         if ( err == 0 )
 		dispatch(r,TOKEN_EXISTS | F_FOUND,NULL,NULL);
 	else
-	if ( err == 1 )
-        	dispatch(r,TOKEN_EXISTS | F_NOTFOUND,NULL,NULL);
-	else
-		reply_log(r,L_ERROR,"exists on %s failed: %s",r->dbp->name,strerror(errno));
+#ifdef DB_VERSION_MAJOR
+        if (err == DB_NOTFOUND)
+                dispatch(r,TOKEN_EXISTS | F_NOTFOUND,NULL,NULL);
+        else {
+                errno=err;
+                reply_log(r,L_ERROR,"exists on %s failed: %s",r->dbp->name,strerror(errno));
+                }
+#else
+        if (err == 1)
+                dispatch(r,TOKEN_EXISTS | F_NOTFOUND,NULL,NULL);
+        else
+                reply_log(r,L_ERROR,"exists on %s failed: %s",r->dbp->name,strerror(errno));
+#endif
         };
    	
 void do_delete( connection * r) {
         DBT key;
         int err;
 
+	memset(&key, 0, sizeof(key));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command DELETE");
+		dbms_log(L_ERROR,"Command received from non-client command DELETE");
 		return;
 		};
 
         key.data = r->v1.data;
         key.size = r->v1.size;
 
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->del)( r->dbp->handle, NULL, &key, 0);
+#else
         err=(r->dbp->handle->del)( r->dbp->handle, &key,0);
+#endif
 
-       if ( err == 0 )
+        if ( err == 0 )
                 dispatch(r,TOKEN_DELETE | F_FOUND,NULL,NULL);
         else
+#ifdef DB_VERSION_MAJOR
+        if (err == DB_NOTFOUND)
+                dispatch(r,TOKEN_DELETE | F_NOTFOUND,NULL,NULL);
+        else {
+                errno=err;
+		reply_log(r,L_ERROR,"delete on %s failed: %s",r->dbp->name,strerror(errno));
+                }
+#else
         if ( err == 1 )
                 dispatch(r,TOKEN_DELETE | F_NOTFOUND,NULL,NULL);
         else
 		reply_log(r,L_ERROR,"delete on %s failed: %s",r->dbp->name,strerror(errno));
+#endif
         };        
 
 void do_store( connection * r) {
         DBT key, val;
         int err;
 
+	memset(&key, 0, sizeof(key));
+	memset(&val, 0, sizeof(val));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command STORE");
+		dbms_log(L_ERROR,"Command received from non-client command STORE");
 		return;
 		};
 
@@ -615,29 +1129,42 @@ void do_store( connection * r) {
         val.data = r->v2.data;
         val.size = r->v2.size;
 
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->handle->put)( r->dbp->handle, NULL, &key, &val, 0);
+#else
         err=(r->dbp->handle->put)( r->dbp->handle, &key, &val,0);
+#endif
 
 	if ( err == 0 )
-                dispatch(r,TOKEN_STORE | F_NOTFOUND,NULL,NULL);
+                dispatch(r,TOKEN_STORE | F_FOUND,NULL,NULL); /* it was F_NOTFOUND wich was returning always 1 even if not there (F_NOTFOUND) */
         else
-        if ( err == 1 )
+#ifdef DB_VERSION_MAJOR
+        if ( err < 0 )
                 dispatch(r,TOKEN_STORE | F_FOUND,NULL,NULL);
+        else {
+		errno=err;
+		reply_log(r,L_ERROR,"store on %s failed: %s",r->dbp->name,strerror(errno));
+		};
+#else
+        if ( err == 1 )
+                dispatch(r,TOKEN_STORE | F_NOTFOUND,NULL,NULL); /* it was F_FOUND which was returning always 0 even if already there (F_FOUND) see above dispatch */
         else
 		reply_log(r,L_ERROR,"store on %s failed: %s",r->dbp->name,strerror(errno));
+#endif
 
         };
       
 void do_sync( connection * r) {
-        int err;
+        int err=0;
 
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command SYNC");
+		dbms_log(L_ERROR,"Command received from non-client command SYNC");
 		return;
 		};
 
         err=(r->dbp->handle->sync)( r->dbp->handle,0);
 
-        if (err < 0 ) {
+        if (err != 0 ) {
 		reply_log(r,L_ERROR,"sync on %s failed: %s",r->dbp->name,strerror(errno));
                 }
 	else {
@@ -649,12 +1176,12 @@ void do_clear( connection * r) {
 	int err;
 
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command CLEAR");
+		dbms_log(L_ERROR,"Command received from non-client command CLEAR");
 		return;
 		};
 
 	/* close the database, remove the file, and repoen... ? */	
-	if ( ((err=(r->dbp->handle->close)( r->dbp->handle)) < 0 ) ||
+	if ( (_dbclose(r->dbp)) ||
 	     ((err=unlink(r->dbp->pfile)) !=0) ||
 	     ((err=open_dbp( r->dbp )) != 0) ) 
 	{
@@ -671,12 +1198,15 @@ void do_list( connection * r) {
         DBT key, val;
         int err;
 
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
 	/* now the issue here is... do we want to do
 	 * the entire array; as one HUGE malloc ?
 	 */
 
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command LIST");
+		dbms_log(L_ERROR,"Command received from non-client command LIST");
 		return;
 		};
 
@@ -694,7 +1224,7 @@ void do_list( connection * r) {
         if ( err < 0 )
 		reply_log(r,L_ERROR,"first on %s failed: %s",
 			r->dbp->name,strerror(errno));
-
+	else
 	if ( err == 1 )
                 dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
         else
@@ -704,14 +1234,32 @@ void do_list( connection * r) {
 	}
 
 void do_ping( connection * r) {
-
         dispatch(r,TOKEN_PING | F_FOUND,NULL,NULL);
 	}
+
+void do_drop( connection * r) {
+	char dbpath[ 1024 ];
+	dbms_log(L_INFORM,"Drop cmd");
+
+	/* Construct name  - add .db where/if needed ?? */
+	/* snprintf(dbpath,sizeof(dbpath),"%s.db",r->dbp->pfile); */
+	snprintf(dbpath,sizeof(dbpath),"%s",r->dbp->pfile);
+
+	/* or r->dbp->close = 2; */
+	zap_dbs(r->dbp); 
+	
+	if (unlink(dbpath)) 
+		reply_log(r,L_ERROR,
+			"DB file %s could not be deleted: %s",
+                        dbpath,strerror(errno));
+	else
+        	dispatch(r,TOKEN_DROP| F_FOUND,NULL,NULL);
+}
 
 void do_close( connection * r) {
 
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command CLOSE");
+		dbms_log(L_ERROR,"Command received from non-client command CLOSE");
 		return;
 		};
 
@@ -719,36 +1267,83 @@ void do_close( connection * r) {
 	r->close = 1; MX;
 	}
 
-void do_first( connection * r) {
-        DBT key, val;
+/* Combined from function; from first record when flag==R_FIRST
+ * or from the current cursor if flag=R_SET or R_SET_RANGE. If
+ * no cursos is yet set; the latter two default to an R_FIRST.
+ */
+static
+void _from( connection * r, DBT *key, DBT *val, int flag) {
         int err;
 
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command FIRST");
+		dbms_log(L_ERROR,"Command received from non-client command FIRST/FROM");
 		return;
 		};
 
 	/* keep track of whom used the cursor last...*/
 	r->dbp->lastfd = r->clientfd;
 
-        err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_FIRST);
+#ifdef DB_VERSION_MAJOR
+        err=(r->dbp->cursor->c_get)( r->dbp->cursor, key, val, flag);
+#else 
+      	err=(r->dbp->handle->seq)( r->dbp->handle, key, val,flag);
+#endif
 
+#ifdef DB_VERSION_MAJOR
+        if (err == DB_NOTFOUND)
+                dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
+        else
+        if ( err == 0 )
+                dispatch(r,TOKEN_FIRSTKEY | F_FOUND,key,val);
+        else {
+                errno=err;
+		reply_log(r,L_ERROR,"first on %s failed: %s",r->dbp->name,strerror(errno));
+                }
+#else
 	if ( err == 1 )
                 dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
         else
         if ( err == 0 )
-                dispatch(r,TOKEN_FIRSTKEY | F_FOUND,&key,&val);
+                dispatch(r,TOKEN_FIRSTKEY | F_FOUND,key,val);
         else
 		reply_log(r,L_ERROR,"first on %s failed: %s",r->dbp->name,strerror(errno));
+#endif
+};
 
-        };
+void do_first(connection * r) {
+        DBT key, val;
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+	_from(r,&key,&val,R_FIRST);
+}
+
+void do_from(connection *r) {
+        DBT key, val;
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
+	key.data = r->v1.data;
+	key.size = r->v1.size;
+
+	/* SET_RANGE only works on BTREEs - must use R_SET otherwise.  */
+
+#ifdef DB_VERSION_MAJOR
+	_from(r,&key,&val,DB_SET_RANGE);
+#else
+	_from(r,&key,&val,R_CURSOR);
+#endif
+};
+
 
 void do_next( connection * r) {
         DBT key, val;
         int err;
 
+	memset(&key, 0, sizeof(key));
+        memset(&val, 0, sizeof(val));
+
 	if (r->type != C_CLIENT) {
-		log(L_ERROR,"Command received from non-client command NEXT");
+		dbms_log(L_ERROR,"Command received from non-client command NEXT");
 		return;
 		};
 
@@ -759,16 +1354,28 @@ void do_next( connection * r) {
 		r->dbp->lastfd = r->clientfd;
         	key.data = r->v1.data;
         	key.size = r->v1.size;
-        	err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_CURSOR);
 
+#ifdef DB_VERSION_MAJOR
+                err=(r->dbp->cursor->c_get)(r->dbp->cursor, &key, &val, R_CURSOR);
+#else
+        	err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_CURSOR);
+#endif
+
+#ifdef DB_VERSION_MAJOR
+		if ( (err != 0) && (err != DB_NOTFOUND) ) {
+                	reply_log(r,L_ERROR,"Internal DB Error %s",r->dbp->name);
+			return;
+			};
+#else
 		if (err<0 && errno ==0)
-			log(L_WARN,"seq-cursor We have the inpossible err=%d and %d",
+			dbms_log(L_WARN,"seq-cursor We have the impossible err=%d and %d",
 				err,errno);
 
 		if ((err != 0) && (err != 1) && (errno != 0) ) {
                 	reply_log(r,L_ERROR,"Internal DB Error %s",r->dbp->name);
 			return;
 			};
+#endif
 
 		/* BUG: we could detect the fact that the previous key
 	 	 *	the callee was aware of, has been zapped. For
@@ -780,46 +1387,64 @@ void do_next( connection * r) {
 	else 
 		err = 0;
 
-        if (err == 0) 
+        if (err == 0)
+#ifdef DB_VERSION_MAJOR
+                err=(r->dbp->cursor->c_get)( r->dbp->cursor, &key, &val, R_NEXT);
+#else 
 		err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_NEXT);
+#endif
 
 	trace("%6s %12s %20s: %s %s","NEXT",
 		r->dbp->name, iprt(&key), 
 		iprt( err==0 ? &val : NULL ),eptr(err));
 
+#ifdef DB_VERSION_MAJOR
+        if ( ( err == DB_NOTFOUND ) || ( err > 0 ) )
+		dispatch(r,TOKEN_NEXTKEY | F_NOTFOUND,NULL,NULL);
+	else
+#else
         if (( err == 1 ) || (( err <0 ) && (errno == 0)) )
 		dispatch(r,TOKEN_NEXTKEY | F_NOTFOUND,NULL,NULL);
 	else
+#endif
 	if ( err == 0 )
         	dispatch(r,TOKEN_NEXTKEY | F_FOUND,&key,&val);
         else {
+#ifdef DB_VERSION_MAJOR
+		errno=err;
+#endif
 		reply_log(r,L_ERROR,"next on %s failed: %s",r->dbp->name,strerror(errno));
 		};
         };
 
 struct command_req cmd_table[ TOKEN_MAX ];
-#define IT(i,s,f) { cmd_table[i].cnt = 0; cmd_table[i].cmd = i; cmd_table[i].info = s; cmd_table[i].handler = f; }
+#define IT(i,s,f,o) { cmd_table[i].cnt = 0; cmd_table[i].cmd = i; cmd_table[i].info = s; cmd_table[i].handler = f; cmd_table[i].op = o; }
 void init_cmd_table( void )
 {
 	int i;
 	for(i=0;i<TOKEN_MAX;i++) 
-		IT( i, "VOID",NULL );
+		IT( i, "VOID",NULL, T_NONE );
 
-	IT( TOKEN_INIT,	"INIT",&do_init);
-	IT( TOKEN_FETCH,"FTCH",&do_fetch);
-	IT( TOKEN_STORE,"STRE",&do_store);
-	IT( TOKEN_DELETE,"DELE",&do_delete);
-	IT( TOKEN_CLOSE,"CLSE",&do_close);
-	IT( TOKEN_NEXTKEY,"NEXT",&do_next);
-	IT( TOKEN_FIRSTKEY,"FRST",&do_first);
-	IT( TOKEN_EXISTS,"EXST",&do_exists);
-	IT( TOKEN_SYNC,	"SYNC",&do_sync);
-	IT( TOKEN_CLEAR,"CLRS",&do_clear);
-	IT( TOKEN_PING,"CLRS",&do_ping);
-	IT( TOKEN_INC,"INCR",&do_inc);
-	IT( TOKEN_LIST,"LIST",&do_list);
+	IT( TOKEN_INIT,		"INIT",&do_init,	T_ERR);	/* chicken/egg - we do not know the error yet */
+	IT( TOKEN_FETCH,	"FTCH",&do_fetch,	T_RDONLY);
+	IT( TOKEN_STORE,	"STRE",&do_store,	T_RDWR);
+	IT( TOKEN_DELETE,	"DELE",&do_delete,	T_RDWR);
+	IT( TOKEN_CLOSE,	"CLSE",&do_close,	T_NONE);
+	IT( TOKEN_NEXTKEY,	"NEXT",&do_next,	T_RDONLY);
+	IT( TOKEN_FIRSTKEY,	"FRST",&do_first,	T_RDONLY);
+	IT( TOKEN_EXISTS,	"EXST",&do_exists,	T_RDONLY);
+	IT( TOKEN_SYNC,		"SYNC",&do_sync,	T_RDWR);
+	IT( TOKEN_CLEAR,	"CLRS",&do_clear,	T_CREAT);
+	IT( TOKEN_PING,		"PING",&do_ping,	T_NONE);
+	IT( TOKEN_DROP,		"DROP",&do_drop,	T_DROP);
+	IT( TOKEN_INC,		"INCR",&do_inc,		T_RDWR);
+	IT( TOKEN_DEC,		"DECR",&do_dec,		T_RDWR);
+	IT( TOKEN_PACKINC,	"PINC",&do_packinc,	T_RDWR);
+	IT( TOKEN_PACKDEC,	"PDEC",&do_packdec,	T_RDWR);
+	IT( TOKEN_LIST,		"LIST",&do_list,	T_RDONLY);
+	IT( TOKEN_FROM,		"FROM",&do_from,	T_RDONLY);
 #ifdef FORKING
-	IT( TOKEN_FDPASS,"PASS",&do_pass);
+	IT( TOKEN_FDPASS,"PASS",&do_pass,		T_ERR);
 #endif
 }
 
@@ -827,13 +1452,22 @@ void parse_request( connection * r) {
 	register int i = r->cmd.token;
 
 	if ( i>=0 && i<= TOKEN_MAX && cmd_table[i].handler) {
-		cmd_table[i].cnt++;
-		(cmd_table[i].handler)(r);
-		return;
+		if (cmd_table[i].op <= r->op) {
+			cmd_table[i].cnt++;
+			(cmd_table[i].handler)(r);
+		} else {
+			char * ip = strdup(inet_ntoa(r->address.sin_addr));
+			reply_log(r,L_ERROR,"Access violation for %s on %s (required is %s but IP is limited to %s)",
+				ip,cmd_table[i].info,
+				op2string(cmd_table[i].op),op2string(r->op));
+			free(ip);
+			r->close = 1; MX;
 		}
+		return;
+	}
 
 	reply_log(r,L_ERROR,"Unkown command token %d",i);
 	r->close = 1; MX;
 	return;
-	}
+}
 

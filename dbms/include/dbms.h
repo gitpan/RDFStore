@@ -1,76 +1,110 @@
-/* $Id: dbms.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $ $Tag$
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
+ *
+ * NOTICE
+ *
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
+ *
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ */ 
+
+/*
+ *
+ * WARNING! if you change this file you have also to manually update ../../lib/DBMS.pm to be in-sync with these definitions
+ *
+ */ 
+
+#ifndef _H_DBMS_
+#define _H_DBMS_
+
+#include "dbms_compat.h"
+
+typedef uint32_t	dbms_counter;	
+
+typedef enum { 
+	DBMS_EVENT_RECONNECT,
+	DBMS_EVENT_WAITING
+} dbms_cause_t;
+
+typedef enum {
+	DBMS_XSMODE_DEFAULT = 0,
+	DBMS_XSMODE_RDONLY,
+	DBMS_XSMODE_RDWR,
+	DBMS_XSMODE_CREAT,
+	DBMS_XSMODE_DROP
+} dbms_xsmode_t;
+
+typedef int dbms_error_t;
+
+typedef struct {
+        char * name;
+        char * host;
+        unsigned long port;
+        int mode;
+        int sockfd;
+        unsigned long addr;
+
+	void * (* malloc)(size_t s);
+	void (* free)(void * adr);
+	void (* callback)(dbms_cause_t cause, int cnt);
+        void (* error)(char * err, int erx);
+	
+	char err[ 256 ];
+        } dbms;
+
+extern char *
+dbms_get_error( 
+	dbms * me 
+);
+
+extern dbms *
+dbms_connect(
+        char *name, 
+	char * host, int port, 
+	dbms_xsmode_t mode,
+        void *(*_my_malloc)( size_t size),
+        void(*_my_free)(void *),
+        void(*_my_report)(dbms_cause_t cause, int count),
+	void(*_my_error)(char * err, int erx)
+);
+
+extern dbms_error_t
+dbms_disconnect(
+	dbms * me
+);
+
+extern dbms_error_t
+dbms_comms (
+        dbms * me,
+        int token, 
+        int * retval,
+        DBT * v1, 
+        DBT * v2,
+        DBT * r1,
+        DBT * r2
+        );
+
+/* dbms_error_t values; beside normal
+ * errno values from libc et. al.
  */
-#ifndef _H_DBMS
-#define _H_DBMS
-
-#ifdef TIME_DEBUG
-#define		P0		0
-#else
-#define		P0		1
-#endif
-
-#define		DBMS_HOST	"127.0.0.1"
-#define		DBMS_PORT	1234
-#define		DBMS_MODE	0666
-
-#define		MASK_SOURCE	(128+64)
-#define 	F_CLIENT_SIDE	128
-#define 	F_SERVER_SIDE	64
-#define 	F_INTERNAL	(128+64)
-
-#define		MASK_STATUS	32
-#define		F_FOUND		32
-#define		F_NOTFOUND	0
-
-#define		MASK_TOKEN	31
-#define		TOKEN_ERROR	0
-#define		TOKEN_FETCH	1
-#define		TOKEN_STORE 	2	
-#define		TOKEN_DELETE 	3		
-#define		TOKEN_NEXTKEY 	4
-#define		TOKEN_FIRSTKEY 	5
-#define		TOKEN_EXISTS	6
-#define		TOKEN_SYNC	7
-#define		TOKEN_INIT	8
-#define		TOKEN_CLOSE	9
-#define		TOKEN_CLEAR	10
-#define		TOKEN_FDPASS	11 /* only used for internal passing server side */
-#define		TOKEN_PING	12 /* only used between servers ?? */
-#define		TOKEN_INC	13 /* atomic increment */
-#define		TOKEN_LIST	14 /* list all keys */
-
-#define		TOKEN_MAX	15 /* last token.. */
-
-struct header {
-	unsigned char	token;
-	unsigned long	len1;
-	unsigned long	len2;
-#ifdef TIME_DEBUG
-	struct timeval  stamp;
-#endif
-	};	
-
-#define MAX_STATIC_NAME		256
-#define MAX_STATIC_PFILE	MAXPATHLEN
-
-#ifndef MAX_PAYLOAD
-#define MAX_PAYLOAD	(32*1024)
-#endif
-
-#ifdef STATIC_CS_BUFF
-#define MAX_CS_PAYLOAD	MAX_PAYLOAD
-#define	P2		1	
-#else
-#define P2		0
-#endif
-
-#ifdef STATIC_SC_BUFF
-#define MAX_SC_PAYLOAD	MAX_PAYLOAD
-#define	P1		1
-#else
-#define P1		0
-#endif
-
-#define		DBMS_PROTO	(110+P0*1+P1*2+P2*4)
+#define         E_UNDEF         1000
+#define         E_NONNUL        1001 
+#define         E_FULLREAD      1002 
+#define         E_FULLWRITE     1003
+#define         E_CLOSE         1004
+#define         E_HOSTNAME      1005
+#define         E_VERSION       1006
+#define         E_PROTO         1007
+#define         E_ERROR         1008
+#define         E_NOMEM         1009
+#define         E_RETRY         1010
+#define         E_NOPE          1011
+#define         E_XXX           1012
+#define         E_TOOBIG        1013
+#define         E_BUG           1014
 
 #endif

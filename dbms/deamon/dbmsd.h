@@ -1,35 +1,39 @@
-/* DBMS Server 
- * $Id: dbmsd.h,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+ * NOTICE
  *
- * based on UKDCils
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: dbmsd.h,v 1.12 2004/08/19 18:57:36 areggiori Exp $
  */
 #ifndef _H_DBMSD
 #define _H_DBMSD
 
-#include <assert.h>	/* XXX wrong place */
-
 #include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
 #include "deamon.h"
 
-#ifdef TIME_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
 extern float		total_time;
 #endif    
 
-extern connection	      * client_list;
+extern connection	      * client_list, *mum;
 extern struct child_rec	      * children;
 extern fd_set			rset,wset,eset,alleset,allrset,allwset;
 extern char		      * default_dir;
 extern char		      * dir;
-extern int			sockfd,maxfd,mum_pgid,mum_pid,mum_fd,max_dbms,max_processes,max_clients;
+extern int			sockfd,maxfd,mum_pgid,mum_pid,max_dbms,max_processes,max_clients;
 extern char		      * my_dir;
 extern char		      * pid_file;
+extern char		      * conf_file;
 extern int			check_children;
 extern dbase                 * first_dbp;
 
@@ -73,7 +77,8 @@ void select_loop();
 struct child_rec * create_new_child(void);
 int handoff_fd( struct child_rec * child, connection * r );
 int takeon_fd(int conn_fd);
-connection * handle_new_connection( int sockfd , int type);
+connection * handle_new_local_connection( int sockfd , int type);
+connection * handle_new_connection( int sockfd , int type, struct sockaddr_in addr);
 
-#define MX log(L_DEBUG,"@@ %s:%d\n",__FILE__,__LINE__);
+#define MX dbms_log(L_DEBUG,"@@ %s:%d",__FILE__,__LINE__);
 #endif

@@ -1,8 +1,8 @@
-#!/usr/local/bin/perl -I ../lib
+#!/usr/bin/perl
 ##############################################################################
-# 	Copyright (c) 2000 All rights reserved
-#	Alberto Reggiori <areggiori@webweaving.org>
-#
+# 	Copyright (c) 2000-2004 All rights reserved
+# 	Alberto Reggiori <areggiori@webweaving.org>
+#	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -18,17 +18,22 @@
 #
 # 3. The end-user documentation included with the redistribution,
 #    if any, must include the following acknowledgment:
-#       "This product includes software developed by
+#       "This product includes software developed by 
 #        Alberto Reggiori <areggiori@webweaving.org> and
 #        Dirk-Willem van Gulik <dirkx@webweaving.org>."
 #    Alternately, this acknowledgment may appear in the software itself,
 #    if and wherever such third-party acknowledgments normally appear.
 #
-# 4. Neither the name of the University nor the names of its contributors
+# 4. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#    This product includes software developed by the University of
+#    California, Berkeley and its contributors. 
+#
+# 5. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
-# 5. Products derived from this software may not be called "RDFStore"
+# 6. Products derived from this software may not be called "RDFStore"
 #    nor may "RDFStore" appear in their names without prior written
 #    permission.
 #
@@ -47,56 +52,48 @@
 #
 # ====================================================================
 #
-# This software consists of work developed by Alberto Reggiori and
-# Dirk-Willem van Gulik and was originally based on public domain software
-# written at the Stanford University Database Group by Sergey Melnik.
-# For more information on the RDF API Draft work, 
+# This software consists of work developed by Alberto Reggiori and 
+# Dirk-Willem van Gulik. The RDF specific part is based on public 
+# domain software written at the Stanford University Database Group by 
+# Sergey Melnik. For more information on the RDF API Draft work, 
 # please see <http://www-db.stanford.edu/~melnik/rdf/api.html>
+# The DBMS TCP/IP server part is based on software originally written
+# by Dirk-Willem van Gulik for Web Weaving Internet Engineering m/v Enschede,
+# The Netherlands.
 #
 ##############################################################################
 
 use Carp;
-use RDFStore;
-use Data::MagicTie;
+use RDFStore::NodeFactory;
+use RDFStore::Model;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] -stuff <URL_or_filename> [-output_dir <valid_directoryname>] -storename <IDENTIFIER> [-style <BerkeleyDB|DB_File|DBMS>] [-compression] [-freetext] [-split <number>] [-dbms_host <hostname>] [-dbms_port <port>] [-serialise] [-v]
+    $0 [-h] -storename <IDENTIFIER> [-freetext] [-serialise] [-v] [-Context <URL_or_filename>] <URL_or_filename>
 
 Query an existing RDFStore database.
 
 -h	Print this message
--v	Be verbose
 
--stuff  <URL_or_filename>
-                URL or filename. '-' denotes STDIN 
-
-[-output_dir <valid_directoryname>]
-		Output directory for DB files generated. Default is cwd.
+[-v]	Be verbose
 
 -storename <IDENTIFIER>
-		A label or identifier to identify the RDFStore database
+		RDFStore database name IDENTIFIER is like rdfstore://[HOSTNAME[:PORT]]/PATH/DBDIRNAME
 
-[-style <BerkeleyDB|DB_File|DBMS>]
-		BerkeleyDB, DB_File or DBMS store. Default is DB_File.
-
-[-compression]
-		Use RLE encoding in the generated RDFStore model
+                        E.g. URLs
+                                        rdfstore://mysite.foo.com:1234/this/is/my/rd/store/database
+                                        rdfstore:///root/this/is/my/rd/store/database
 
 [-freetext]
                 Generates free-text searchable database
 
-[-split <number>]
-		Number of DB files to split around - see Data::MagicTie(3)
-
-[-dbms_host <hostname>]
-                Name or IP number of the DBMS host. This option makes sense only using the DBMS style; default is 'localhsot' see man dbmsd(8)
- 
-[-dbms_port <port>]
-                TCP/IP port number of the DBMS host. This option makes sense only using the DBMS style; default is 1234
-
 [-serialise]
-                generate strawman RDF output
+                Generate strawman RDF output
+
+[-Context <URL_or_filename>]
+                Specify a resource to set a kind of context for the statements
+
+Main paramter is URL or filename to parser; '-' denotes STDIN.
 
 EOU
 
@@ -105,24 +102,18 @@ print $Usage and exit if ($#ARGV<0);
 
 my $factory = new RDFStore::NodeFactory();
 
-my ($verbose,$compression,$freetext,$serialise,$stuff,$storename,$style,$split,$output_dir,$dbms_host,$dbms_port);
+my ($verbose,$Context,$freetext,$serialise,$stuff,$storename,$output_dir,$dbms_host,$dbms_port);
 my @query;
-while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
+while (defined($ARGV[0])) {
     my $opt = shift;
 
     if ($opt eq '-storename') {
         $storename = shift;
-	$storename .= '/'
-                unless( (not(defined $storename)) ||
-                        ($storename eq '') ||
-                        ($storename =~ /\s+/) ||
-                        ($storename =~ /\/$/) );
-    } elsif ($opt eq '-style') {
-	$style=shift;
+    } elsif ($opt eq '-Context') {
+	$Context=shift;
     } elsif ($opt eq '-stuff') {
+	print STDERR "WARNING! -stuff option is deprecated - input source is defined to be last passed argument now\n";
         $stuff = shift;
-    } elsif ($opt eq '-compression') {
-        $compression = 1;
     } elsif ($opt eq '-freetext') {
         $freetext = 1;
     } elsif ($opt eq '-serialise') {
@@ -132,9 +123,6 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
         exit;
     } elsif ($opt eq '-v') {
 	$verbose=1;
-    } elsif ($opt eq '-split') {
-	$opt=shift;
-        $split = (int($opt)) ? $opt : 0;
     } elsif ($opt eq '-output_dir') {
 	$opt=shift;
 	$output_dir = $opt
@@ -150,22 +138,18 @@ while (defined($ARGV[0]) and $ARGV[0] =~ /^[-+]/) {
 	$opt=shift;
         $dbms_port = (int($opt)) ? $opt : undef;
     } else {
-        die "Unknown option: $opt\n$Usage";
-    };
+        $stuff = $opt;
+    	};
 };
 
-# we assume that the RDFStore has been generated by MagicTie Style parser
-my $model = new RDFStore::SetModel(
+my $model = new RDFStore::Model(
 					Name	=>	$output_dir.$storename,
-					Style   =>      $style,
 					Host =>    $dbms_host,
                                         Port =>    $dbms_port,
-                                        Split       =>      $split,
-					Compression	=>	$compression,
 					FreeText	=>	$freetext,
-					Sync	=> 1 )
+					Sync	=> 1,
+					Context => ( (defined $Context) ? $factory->createResource($Context): undef ) )
 	or croak "Oh dear, can not build my model :( $!";
-$factory = new RDFStore::NodeFactory();
 
 if($stuff eq '-') {
 	*STUFF=*STDIN;

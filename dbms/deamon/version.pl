@@ -1,12 +1,28 @@
 #!/usr/bin/perl
-$rcsid='$Id: version.pl,v 1.1.1.1 2001/01/18 09:53:21 reggiori Exp $';
+# *
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
+# *
+# * NOTICE
+# *
+# * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+# * file you should have received together with this source code. If you did not get a
+# * a copy of such a license agreement you can pick up one at:
+# *
+# *     http://rdfstore.sourceforge.net/LICENSE
+# *
+$rcsid='$Id: version.pl,v 1.7 2004/08/19 18:57:37 areggiori Exp $';
 #
 $h=`hostname`;
 chop $h;
-$a=`id -p`;
 $id='??';
-$id=$1 if $a=~ m/uid\s+(\w+)/;
-$id=$1 if $a=~ m/login\s+(\w+)/;
+if ($^O =~ m/solaris/i) {
+	$id=`whoami`;
+	chop $id;
+} else {
+	$a=`id -u -n`;
+	$id=$1 if $a=~ m/(\w+)/;
+}
 
 # $a=`pwd`;
 # $a =~ m/dbms-(\d+)\.(\d+)/
@@ -25,16 +41,34 @@ print qq|\
  */
 #include <sys/types.h>
 
+#include "dbms_compat.h"
+
 #if 0
 static char rcsid[]="$rcsid";
 #endif
 
 static char version[]= "DBMS/$version - $date - $id\@$h - "
-#ifdef FORKING
-	"forking"
+#ifdef DB_VERSION_MAJOR
+	DB_VERSION_STRING
 #else
-	"NON forking"
+	"Berkeley DB 1.x (perhaps BSD-ish built in library)"
 #endif
+
+#ifdef FORKING
+	" - forking"
+#else
+	" - NON forking"
+#endif
+#ifdef STATIC_BUFF
+	" - recycle structs "
+#endif
+#ifdef	STATIC_CS_BUFF     
+	" - static Client buffs "
+#endif
+#ifdef STATIC_SC_BUFF
+	" - static Server buffs "
+#endif
+
 	;
 
 char * get_full( void ) {

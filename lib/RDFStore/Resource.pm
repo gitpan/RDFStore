@@ -1,5 +1,6 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -7,8 +8,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://rdfstore.jrc.it/LICENSE
-# *
+# *     http://rdfstore.sourceforge.net/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -23,6 +23,11 @@
 # *		- updated accordingly to rdf-api-2001-01-19
 # *		- allow creation of resources from URI(3) objects or strings using XMLNS LocalPart
 # *		- hashCode() and getDigest() return separated values for localName and namespace if requested
+# * 	version 0.41
+# *		- added anonymous resources support - see also RDFStore::NodeFactory(3) and RDFStore::Model(3)
+# *		- added isAnonymous() and isbNode()
+# *             - updated accordingly to new RDFStore API
+# *             - removed BLOB support
 # *
 
 package RDFStore::Resource;
@@ -30,135 +35,61 @@ package RDFStore::Resource;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.41';
 
 use Carp;
-use RDFStore::Stanford::Resource;
+use RDFStore; # load the underlying C code in RDFStore.xs because it is all in one module file
 use RDFStore::RDFNode;
 
-@RDFStore::Resource::ISA = qw( RDFStore::RDFNode RDFStore::Stanford::Resource );
-
-sub new {
-	my $self = $_[0]->SUPER::new();
-
-	if(defined $_[2]) {
-		$self->{namespace} = $_[1];
-		$self->{localName} = $_[2];
-	} else {
-		croak "Local name cannot be null"
-			unless(defined $_[1]);
-
-		my $ln = $_[1];
-
-		#XMLNS LocalPart (see http://www.w3.org/TR/1999/REC-xml-names-19990114/#NT-LocalPart)
-		my $NameStrt = "[A-Za-z_:]|[^\\x00-\\x7F]";
-		my $NameChar = "[A-Za-z0-9_:.-]|[^\\x00-\\x7F]";
-		my $Name = "(?:$NameStrt)(?:$NameChar)*";
-		if(	(ref($_[1])) &&
-			($_[1]->isa("URI")) ) {
-			$self->{localName} = $_[1]->fragment;
-			$self->{namespace} = $_[1]->as_string;
-			$self->{namespace} =~ s/$self->{localName}$//g;
-		} elsif($ln =~ s/($Name)$//g) {
-			$self->{localName} = $1;
-			$self->{namespace} = $ln;
-#print STDERR "Resource: '",$self->{namespace},"' - '",$self->{localName},"'\n";
-		} else {
-			$self->{namespace} = undef;
-			$self->{localName} = $_[1];
-		};
-	};
-
-	$self->{_hashCode_Namespace} = 0;
-	$self->{_hashCode_LocalName} = 0;
-
-	bless $self,$_[0];
+sub isbNode {
+	return $_[0]->isAnonymous;
 };
 
 sub getURI {
-	return ($_[0]->getNamespace()) ?
-			$_[0]->getNamespace().$_[0]->getLocalName() :
-			$_[0]->getLocalName();
+	return
+		if($_[0]->isAnonymous); #bNodes do not have a URI
+
+	return $_[0]->getLabel;
 };
 
-sub getNamespace {
-	return $_[0]->{namespace};
-};
+sub getNodeID {
+        return
+                unless($_[0]->isAnonymous);
 
-sub getLocalName {
-	return $_[0]->{localName};
-}; 
-
-sub getLabel {
-	return $_[0]->getURI();
-};
-
-# return the four most significant bytes of the digest
-sub hashCode {
-	if(wantarray) {
-#print STDERR "hashCode - wantarray",((caller)[1]),((caller)[2]),"\n";
-		my ($digest_LocalName,$digest_Namespace)=($_[0]->getDigest());
-                $_[0]->{_hashCode_Namespace} = RDFStore::Stanford::Digest::Util::getHashCode( $digest_Namespace )
-			if($_[0]->{_hashCode_Namespace} == 0);
-                $_[0]->{_hashCode_LocalName} = RDFStore::Stanford::Digest::Util::getHashCode( $digest_LocalName )
-			if($_[0]->{_hashCode_LocalName} == 0);
-        	return ($_[0]->{_hashCode_LocalName}, $_[0]->{_hashCode_Namespace});
-	} else {
-        	if($_[0]->{_hashCode} == 0) {
-                	$_[0]->{_hashCode} = RDFStore::Stanford::Digest::Util::getHashCode( scalar($_[0]->getDigest()) );
-        	};
-        	return $_[0]->{_hashCode};
+        return $_[0]->getLabel;
 	};
-};
- 
-sub getDigest {
-	if(wantarray) {
-#print STDERR "getDigest - wantarray",((caller)[1]),((caller)[2]),"\n";
-        	unless(defined $_[0]->{digest_Namespace}) {
-                	$_[0]->{digest_Namespace} = RDFStore::Stanford::Digest::Util::computeDigest(
-                        		        &RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),
-                               	 		$_[0]->getNamespace() )
-                        	or croak "Cannot compute Namespace Digest for node $_[0] ",$_[0]->getLabel();
-        	};
-        	unless(defined $_[0]->{digest_LocalName}) {
-                	$_[0]->{digest_LocalName} = RDFStore::Stanford::Digest::Util::computeDigest(
-                        		        &RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),
-                               	 		$_[0]->getLocalName() )
-                        	or croak "Cannot compute LocalName Digest for node $_[0] ",$_[0]->getLabel();
-        	};
-        	return ($_[0]->{digest_LocalName},$_[0]->{digest_Namespace});
-	} else {
-        	unless(defined $_[0]->{digest}) {
-                	$_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest(
-                        		        &RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),
-                               	 		$_[0]->getLabel() )
-                        	or croak "Cannot compute Digest for node $_[0] ",$_[0]->getLabel();
-        	};
-        	return $_[0]->{digest};
-	};
-};
 
 sub equals {
 	return 0
+                unless(defined $_[1]);
+
+	return 0
+                if ( ref($_[1]) =~ /^(SCALAR|ARRAY|HASH|CODE|REF|GLOB|LVALUE)/ ); #see perldoc perlfunc ref()
+
+	return 0
 		unless(	(defined $_[1]) &&
 			(ref($_[1])) &&
-			($_[1]->isa("RDFStore::Stanford::Resource")) );
+			($_[1]->isa("RDFStore::Resource")) );
 
-	# resources are equal if $_[0]->getURI() eq $_[1]->getURI()
-	unless($_[0]->getNamespace()) {
+	return ( $_[0]->isAnonymous && $_[1]->isAnonymous ) ? ( $_[0]->getNodeID eq $_[1]->getNodeID ) : $_[0]->SUPER::equals($_[1])
+        	if(	($_[0]->isAnonymous) ||
+			($_[1]->isAnonymous) );
+
+	# resources are equal if $_[0]->getURI() eq $_[1]->getURI() unless anonymous; then the digest is checked instead - see RDFStore::RDFNode(3)
+	unless( $_[0]->getNamespace() ) {
         	unless($_[1]->getNamespace()) {
-			return ($_[0]->getLocalName() eq $_[1]->getLocalName()) ? 1 : 0;
+			return ( $_[0]->getLocalName() eq $_[1]->getLocalName() ) ? 1 : 0;
 		} else { # maybe $_[1] did not detect names
 			return ($_[0]->getLocalName() eq $_[1]->getURI()) ? 1 : 0;
-		};
+			};
 	} else {
         	if($_[1]->getNamespace()) {
-			return (	($_[0]->getLocalName() eq $_[1]->getLocalName()) &&
-					($_[0]->getNamespace() eq $_[1]->getNamespace()) ) ? 1 : 0;
+			return (	( $_[0]->getLocalName() eq $_[1]->getLocalName() ) &&
+					( $_[0]->getNamespace() eq $_[1]->getNamespace()) ) ? 1 : 0;
 		} else { # maybe $_[1] did not detect names
 			return ($_[0]->getURI() eq $_[1]->getURI()) ? 1 : 0;
+			};
 		};
-	};
         return $_[0]->SUPER::equals($_[1]);
 };
 
@@ -169,7 +100,7 @@ __END__
 
 =head1 NAME
 
-RDFStore::Resource - implementation of the Resource RDF API
+RDFStore::Resource - An RDF Resource Node implementation
 
 =head1 SYNOPSIS
 
@@ -192,13 +123,78 @@ RDFStore::Resource - implementation of the Resource RDF API
         	unless $resource->equals($resource1);
         print " equal to ".$resource1->toString."\n";
 
+	my $resource = new RDFStore::Resource([ a,{ d => 'value'}, [ 1,2,3] ]);
+ 
+        print $resource->toString." is ";
+        print "not"
+                unless($resource->isbNode);
+        print " anonymous\n";
+
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::Resource implementation.
+An RDF Resource Node implementation which support the so called anonymous-resources or bNodes (blankNodes)
+
+=head1 METHODS
+
+=over 4
+
+=item new ( LOCALNAME_NAMESPACE [, LOCALNAME ] )
+
+This is a class method, the constructor for RDFStore::Resource. In case the method is called with a single perl scalar as parameter a new RDF Resource is created with the string passed as indentifier (LOCALNAME); a fully qualified RDF resource can be constructed by invoching the constructor with B<two> paramters where the former is the NAMESPACE and the latter is the LOCALNAME. By RDF definition we assume that B<LOCALNAME can not be undefined>. If LOCALNAME is a perl reference the new Resource is flagged as anonymous-resource or bNode :)
+
+bNodes can be created either passing a perl reference to the constructor or by using the RDFStore::NodeFactory(3) createbNode() or createAnonymousResource() methods; the latter is actually setting the RDFStore::Resource internal bNode flag.
+
+=item isAnonymous
+
+Return true if the RDF Resource is anonymous or is a bNode
+
+=item isbNode
+
+Return true if the RDF Resource is anonymous or is a bNode
+
+=item getURI
+
+Return the URI identifing the RDF Resource; an undefined values i returned if the node is blank or anonymous.
+
+=item getNamespace
+
+Return the Namespace identifier of the Resource
+
+=item getLocalName
+
+Return the LocalName identifier of the Resource; if the Resource is anonymous (bNode) the Storable(3) representation of the label is returned instead. This will allow to distinguish bNodes between normal resources and give them a kind of unique identity. B<NOTE> See RDFStore::Model(3) to see how actually bNodes are being stored and retrieved in RDFStore(3).
+
+=item getLabel
+
+Return the URI identifing the RDF Resource.
+
+=item equals
+
+Compare two RDF Resources either textual
+
+=item getNodeID
+
+Return the rdf:nodeID if the Resource is anonymous (bNode).
+
+=item getbNode
+
+Return the bNode conent.
 
 =head1 SEE ALSO
 
-RDFStore::Stanford::Resource(3) RDFStore::RDFNode(3) URI(3) Digest(3) 
+RDFStore::RDFNode(3)
+
+=head1 ABOUT RDF
+
+ http://www.w3.org/TR/rdf-primer/
+
+ http://www.w3.org/TR/rdf-mt
+
+ http://www.w3.org/TR/rdf-syntax-grammar/
+
+ http://www.w3.org/TR/rdf-schema/
+
+ http://www.w3.org/TR/1999/REC-rdf-syntax-19990222 (obsolete)
 
 =head1 AUTHOR
 

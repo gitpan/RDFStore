@@ -1,5 +1,6 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -7,8 +8,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://rdfstore.jrc.it/LICENSE
-# *
+# *     http://rdfstore.sourceforge.net/LICENSE
 # *
 # * Changes:
 # *     version 0.1 - 2000/11/03 at 04:30 CEST
@@ -17,7 +17,10 @@
 # *     version 0.4
 # *             - updated accordingly to rdf-api-2001-01-19
 # *		- fixed bug in hashCode() to avoid bulding the digest each time
-# *		- added inheritance from RDFStore::Stanford::Digest::Digestable
+# *		- added inheritance from RDFStore::Digest::Digestable
+# *     version 0.41
+# *		- updated accordingly to new RDFStore API
+# *		- removed BLOB support
 # *                 
 
 package RDFStore::RDFNode;
@@ -25,61 +28,26 @@ package RDFStore::RDFNode;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.4';
+$VERSION = '0.41';
 
 use Carp;
-use RDFStore::Stanford::RDFNode;
-use RDFStore::Stanford::Digest::Digestable;
-use RDFStore::Stanford::Digest::Util;
-
-@RDFStore::RDFNode::ISA = qw ( RDFStore::Stanford::RDFNode RDFStore::Stanford::Digest::Digestable );
-
-sub new {
-	my ($pkg) = @_;
-	my $self = $pkg->SUPER::new();
-
-	$self->{_hashCode} = 0;
-	
-	bless $self,$pkg;
-};
-
-sub getLabel {
-};
+use RDFStore; # load the underlying C code in RDFStore.xs because it is all in one module file
+use RDFStore::Digest::Digestable;
 
 sub toString {
 	return $_[0]->getLabel();
 };
 
-# return the four most significant bytes of the digest
-sub hashCode {
-	if($_[0]->{_hashCode} == 0) {
-		$_[0]->{_hashCode} = RDFStore::Stanford::Digest::Util::getHashCode( $_[0]->getDigest() );
-	};
-	return $_[0]->{_hashCode};
-};
-
-sub getDigest {
-	unless(defined $_[0]->{digest}) {
-        	$_[0]->{digest} = RDFStore::Stanford::Digest::Util::computeDigest(
-				&RDFStore::Stanford::Digest::Util::getDigestAlgorithm(),
-				$_[0]->getLabel() )
-			or croak "Cannot compute Digest for node $_[0] ",$_[0]->getLabel();
-    	};
-    	return $_[0]->{digest};
-};
-
 sub equals {
 	return 0
-		unless(	(defined $_[1]) &&
-			($_[1]->isa("RDFStore::Stanford::RDFNode")) );
+                unless( (defined $_[1]) &&
+			(ref($_[1])) &&
+                        ($_[1]->isa("RDFStore::RDFNode")) );
 
-	if($_[1]->can('getDigest')) {
-		return RDFStore::Stanford::Digest::Util::equal(
-			$_[0]->getDigest()->getDigestBytes(), 
-			$_[1]->getDigest()->getDigestBytes() );
-	};
+        return ( $_[0]->getDigest() eq $_[1]->getDigest() ) ? 1 : 0
+		if($_[1]->can('getDigest'));
 
-	return ($_[0]->getLabel() eq $_[1]->getLabel()) ? 1 : 0;
+        return ( $_[0]->getLabel() eq $_[1]->getLabel() ) ? 1 : 0;
 };
 
 1;
@@ -89,7 +57,7 @@ __END__
 
 =head1 NAME
 
-RDFStore::RDFNode - implementation of the RDFNode RDF API using Digest(3)
+RDFStore::RDFNode - An RDF graph node
 
 =head1 SYNOPSIS
 
@@ -121,11 +89,47 @@ RDFStore::RDFNode - implementation of the RDFNode RDF API using Digest(3)
 
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::RDFNode implementation using Digest(3). It is the basic class inherited by RDFStore::Literal and RDFStore::Resource. It provides general toString(), hashCode(), getDigest() and equals() methods.
+RDFStore::RDFNode is the base abstract class for RDFStore::Literal and RDFStore::Resource.
+
+=head1 METHODS
+
+=over 4
+
+=item new
+
+This is a class method, the constructor for RDFStore::RDFNode.
+
+=item getLabel
+
+Return the label of the RDFNode as perl scalar
+
+=item toString
+
+Return the textual represention of the RDFNode
+
+=item getDigest
+
+Return a Cryptographic Digest (SHA-1 by default) of the node label - see RDFStore::Digest::Digestable(3)
+
+=item equals
+
+Compare two RDFNodes.
 
 =head1 SEE ALSO
 
-RDFStore::Stanford::RDFNode(3) RDFStore::Stanford::Digest::Util(3) Digest(3) RDFStore::Literal(3) RDFStore::Resource(3)
+RDFStore::Literal(3) RDFStore::Resource(3) RDFStore(3) RDFStore::Digest::Digestable(3)
+
+=head1 ABOUT RDF
+
+ http://www.w3.org/TR/rdf-primer/
+
+ http://www.w3.org/TR/rdf-mt
+
+ http://www.w3.org/TR/rdf-syntax-grammar/
+
+ http://www.w3.org/TR/rdf-schema/
+
+ http://www.w3.org/TR/1999/REC-rdf-syntax-19990222 (obsolete)
 
 =head1 AUTHOR
 

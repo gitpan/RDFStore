@@ -1,12 +1,42 @@
-Revision history for Perl extension RDFStore.
+Revision history for RDFStore tcp/ip backend storage
 
-version 0.41 - 
+version 1.2.
 -------------------------------------------------------------------------------------------
 
-	t/
-		- added magictie test
+	Abstracted out a libdbms(.a) which contains all
+	the communciation code and does better error handling.
+	the perl side is now just a wrapper.
 
-version 1.1.1.1 2001/01/18 09:53:20
+	Abstracted/moved all specific things into a compat header 
+	file (see include/*compat*).
+
+	Renamed directory DBMS to client and added client/stub.[ch]
+
+	include/dbms.h
+		- added TOKEN_DEC for atomic decrement
+		- added TOKEN_PACKINC for atomic packed increment
+		- added TOKEN_PACKDEC for atomic packed decrement
+
+	deamon/deamon.h
+		- added definitions for BDB > 1.8x support
+
+	deamon/hanlder.c
+		- added basic BDB > 1.8x support
+		- added atomic decrement support via do_dec()
+		- added atomic packed increment support via do_packinc()
+		- added atomic packed decrement support via do_packdec()
+
+	client/DBMS.xs
+		- updated perl/XS glue code
+		- added atomic decrement - see DEC()
+		- moved client related definitions in client/stub.h
+		- moved code to main RDFStore.xs to avoid dynamic linking problems of libdbms.so
+
+	client/DBMS.pm
+		- added atomic decrement - see dec()
+		- moved one level up to main rdfstore dist dir (see ../lib)
+
+version 1.1.1.1 - 2001/01/18 09:53:20
 -------------------------------------------------------------------------------------------
 
 	A a new version of dbmsd has been made. Most of this code come from one of the

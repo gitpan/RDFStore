@@ -1,4 +1,199 @@
+$Id: CHANGES,v 1.32 2004/08/19 18:57:11 areggiori Exp $
+
 Revision history for Perl extension RDFStore.
+
+version 0.5 - Thu Aug 19 20:08:14 CEST 2004
+----------------------------------------------------------------------------------------------------------------------------
+
+	A brand new indexing model for RDF data has been developed in this release - such a indexing model allows to store
+        quite efficienty "pedantic" RDF descriptions by leveraging on compression of the index of triples using a custom RLE+VLE
+	compression algorithm written in C and XS.  It is under investigation the real need to have a custom compression algorithm 
+	for RDFStore instead of using one in the public domain; some tests showed that general purpose algorithms like LZO or LZF 
+	perfom worse in the specific case of RDFStore where the sparse matrix contains well-known patterns.
+
+	This version start to support the RDF Data Query language (RDQL/Squish) via a proper DBD::RDFStore DBI driver 
+	(see http://www.hpl.hp.co.uk/people/afs/RDQL/ and http://swordfish.rdfweb.org/rdfquery/) The software support tha basic 
+	query language with some extensions to run free-text queries over literals (property values). See also the RDF Query and Rules
+	page at http://www.w3.org/2003/03/rdfqr-tests/
+
+	RDFStore::Model now support basic single statement-grouping (i.e. "context") per statement that allow to run storage 
+	operations giving a kind of context to them e.g. a spatial or temporal context or just the source URI; all basic model 
+	method have been updated to support that. This stuff is really much close to the on going work of RDF Core WG and other 
+	proposals about adding context information to individual triples. This software part is just meant to be a useful and practical
+	artifact and does not want or pretend any of the complex issues being discussed in the RDF community.
+
+	The RDFStore::Parser::OpenHealth parser has been removed from the distribution
+
+	Being that the new storage model does not require Data::MagicTie anymore, the module is being distributed separatly (not on CPAN even ;)
+
+	Some useless modules has been removed from the distribution and some has been renamed; in general the basic storage 
+	functionalities are provided through the RDFStore module, while the Stanford API specific code is available in the RDFStore::* modules. 
+	The SiRPAC RDF parser is still being distributed with the main storage sources but they will be also distributed separately 
+	in the future (XML::SAX::RDF::Filter or something)
+
+	UTF-8 (Unicode) support has been natively introduced into this release - custom C/XS code has been written to allow convertion
+        from/to utf8 to other char encodings - the perl use can also use the RDFStore::Util::UTF8(3) to get general string utility functions
+	which work on UTF8/Unicode.
+
+	Things in CVS now also into the sourceoforge RDFStore CVS repository. In addition the system should compile fine on most of the 
+	UNIX systems out there (including the dbms/ tcp/ip deamon)
+
+	Backend now fully general - software ships with BerkeleyDB, DBMS and caching (in-memory) backends
+
+	Basic caching layer added which should speed up all the DB and I/O operations
+
+	t/
+		- updated all test cases
+		- added 04_rdql.t, 05_serializier.t and 06_objects tests
+
+	RDFStore
+		- updated to be the corner stone of the RDF storage actually implemented in C and XS (lots of C and XS code really hoping to gain 
+		  some speed and credibility here :) Here is the place where all perl world magics happen....almost
+		- now brand new C low-level API interfaced to perl via XS code
+
+	RDQL::Parser
+		- new module
+
+	DBD::RDFStore
+		- new DBI driver to run RDQL/Squish SQL like queries :-) allows to dump query results in several different formats
+
+	RDFStore::Iterator
+		- new module
+
+	RDFStore::Object
+		- new module
+
+	RDFStore::Serializer
+		- new module
+
+	RDFStore::Serializer::RDFXML
+		- new module
+
+	RDFStore::Serializer::NTriples
+		- new module
+
+	RDFStore::Serializer::RSS
+		- new module
+
+	RDFStore::Util::UTF8
+		- new module
+
+	RDFStore::Model
+		- brand new design now using the faster C/XS RDFStore(3) module....finally :)
+		- updated methods to avoid a full copy of statements across when the model is shared if possible
+		- added basic support for statements grouping - see setContext(), getContext() and resetContext()
+		- zapped toStrawmanRDF() method
+		- added serialize() method to generally dump a model/graph to a string or filehanlde
+		- added isConnected() and isRemote() methods
+		- added unite(), subtract(), intersect(), complement() and exor() methods
+		- re-added RDFStore::Resource inheritance  
+		- added getParser(), getReader(), getSerializer() and getWriter() methods
+
+	RDFStore::Parser
+		- new module
+		- includes wget() now using IO::Socket and other general purpose parsing methods
+
+	RDFStore::Parser::SiRPAC
+		- fixed bug in processDescription()
+		- fixed bug in processTypedNode() when removeAttribute
+		- fixed bug in makeAbsolute() when LocalName contains '#'
+		- removed xml:space handling in RDFXML_CharacterDataHandler()
+		- fixed bug in processPredicate() - does not generate triples when PCDATA is pure whitespaces stuff and there are XML subelements
+		- fixed bug in processListItem() when generate rdf:li elements
+		- added rdfcroak() instead of using $expat->xpcroak()
+		- updated newReificationID()
+		- added RDFMS_nodeID and RDFMS_datatype
+                - updated reify()
+                - added rdf:nodeID support
+		- added rdf:parseType="Collection" support to processPredicate()
+		- fixed bug in processPredicate() to force a resource node object for rdf:type on predicate with rdf:resource
+		- removed parse_start() method and added parsestream() to do expat no-blocking parseing of large XML streams
+		- removed processListItem() - new specs require to process containers as nomral predicates and simply enumerating elements
+		- fixed bug in processContainer() to treat RDF containers just like any other typed node but with rdf:li or rdf:_n nodes
+                - added xml:base support
+                - added xml:lang support
+		- added manage_bNodes callback/hanlder
+		- updated bNode identifier generation algorithm - now parser run wide unique - see newReificationID()
+		- various fixes when using getAttributeValue() 
+		- updated rdfcroak() to return source name too when failing
+		- updated processXML() - removed the fetchSchema part
+		- force source to STDIN: if not defined
+		- removed RDFCore_Issues option - now default
+		- added rdfwarn()
+		- added warnings()
+		- moved common code to RDFStore::Parser
+		- added rdf:datatype support
+		- added rdfstore:context support
+
+	RDFStore::Parser::NTriples
+		- new module
+
+	RDFStore::Vocabulary::DC
+		- updated DCMI namespace to http://purl.org/dc/elements/1.1/
+
+	RDFStore::Parser::Styles::RDFStore::Model
+		- renamed from RDFStore::Parser::Styles::MagicTie
+		- added Context option to the storage
+		- fixed typing error when apssing the nodeFactory to the model
+		- allows to specify an existing RDFStore::Model as input
+		- added owl:imports support
+
+	utils/
+		- updated rdfquery.pl to use RDQL/Squish syntax and read some default storage parameters
+		- added context/provenance flags to rdf.pl and rdfingest.pl
+		- added pod2html.pl utility to HTMl format native perl POD documentation
+
+	RDFStore::Resource
+		- added anonymous resources support - see also RDFStore::NodeFactory(3) and RDFStore::Model(3)
+		- added isAnonymous() and isbNode()
+		- updated accordingly to new RDFStore API
+		- removed BLOB support
+
+	RDFStore::RDFNode
+		- updated accordingly to new RDFStore API
+		- removed BLOB support
+
+	RDFStore::Literal
+		- updated accordingly to new RDFStore API
+		- removed BLOB support
+
+	RDFStore::Statement
+		- updated accordingly to new RDFStore API
+		- added statements reification and context support
+
+	RDFStore::Vocabulary::Generator
+		- updated to use RDFStore::Model new API
+
+	RDFStore::Vocabulary::DCQ
+                - updated
+
+	RDFStore::Vocabulary::DCT
+                - new vocabulary for DCMI Type Vocabulary
+
+	RDFStore::Vocabulary::RSS
+                - new vocabulary for RSS1.0 see http://purl.org/rss/1.0/
+
+	RDFStore::Vocabulary::RDFStoreContext
+                - new vocabulary for RDFStore contexts
+
+	RDFStore::Vocabulary::OWL
+                - new vocabulary for OWL see http://www.w3.org/2002/07/owl#
+
+	RDFStore::NodeFactory
+		- added anonymous resource support via createAnonymousResource() and createbNode() - see also RDFStore::Resource(3)
+		- added statements reification support via createReifiedStatement() - see also RDFStore::Statement(3)
+		- updated accordingly to new RDFStore API
+		- added createNTriple() method
+
+	RDFStore::SetModel
+		- removed now included into main RDFStore::Model(3)
+
+	RDFStore::Util::Digest
+		- added as new module to manage SHA-1 cryptographic digests natively (using apache SHA-1 code) most of functionality 
+		  like old module RDFStore::Stanford::Digest::Util(2)
+
+	RDFStore::Model::Iterator
+		- re-implementation of old RDFStore::Model::Statements using RDFStore::Iterator
 
 version 0.42 - Fri Aug 31 17:31:13 CEST 2001
 -------------------------------------------------------------------------------------------

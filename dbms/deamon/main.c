@@ -1,47 +1,21 @@
-/* $Id: main.c,v 1.2 2001/06/18 15:26:18 reggiori Exp $
- * (c) 1998 Joint Research Center Ispra, Italy
- *     ISIS / STA
- *     Dirk.vanGulik@jrc.it
+/*
+ *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
- * based on UKDCils
+ * NOTICE
  *
- * (c) 1995 Web-Weaving m/v Enschede, The Netherlands
- *     dirkx@webweaving.org
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <errno.h>
-#include <unistd.h>
-
-#include <pwd.h>
-#include <syslog.h>
-#include <fcntl.h>
-#include <time.h>
-#include <string.h>
-#include <signal.h>
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/errno.h>
-#include <sys/uio.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-
-#ifdef BSD
-#include <db.h>
-#else
-#include <db_185.h>
-#endif
-
+ * This product is distributed under a BSD/ASF like license as described in the 'LICENSE'
+ * file you should have received together with this source code. If you did not get a
+ * a copy of such a license agreement you can pick up one at:
+ *
+ *     http://rdfstore.sourceforge.net/LICENSE
+ *
+ *
+ * $Id: main.c,v 1.21 2004/08/19 18:57:36 areggiori Exp $
+ */ 
 #include "dbms.h"
+#include "dbms_compat.h"
+#include "dbms_comms.h"
 #include "dbmsd.h"
 #include "version.h"
 
@@ -49,48 +23,74 @@
 #include "handler.h"
 #include "mymalloc.h"
 
+#ifndef USER
 #define USER		"nobody"
+#endif
+
+#ifndef PID_FILE
 #define PID_FILE	"/var/run/dbms.pid"
+#endif
+
+#ifndef DUMP_FILE
 #define DUMP_FILE	"/var/tmp/dbms.dump"
+#endif
+
+#ifndef PORT
 #define PORT 		1234
+#endif
+
+#ifndef DIR_PREFIX
 #define DIR_PREFIX	"/pen/dbms"
+#endif
+
+#ifndef CONF_FILE
+#define CONF_FILE	DIR_PREFIX "/dbms.conf"
+#endif
 
 /* Listen queue, see listen() */
+#ifndef MAX_QUEUE
 #define	MAX_QUEUE	128
+#endif
 
 /* If defined, we check for timeouts (in seconds). When left
  * undefined, no time/bookkeeping is done.
  */
 /* #define TIMEOUT		250 */
 
-#ifdef TIME_DEBUG
+#ifdef RDFSTORE_DBMS_DEBUG_TIME
 float			total_time;
 #endif  
 #ifdef FORKING
 struct child_rec      * children=NULL;
 #endif
 struct connection      * client_list=NULL;
+struct connection      * mum;
 fd_set			rset,wset,eset,alleset,allrset,allwset;
-int			sockfd,maxfd,mum_pid,mum_fd, mum_pgid;
+int			sockfd,maxfd,mum_pid, mum_pgid;
 char		      * my_dir = DIR_PREFIX;
 char		      * pid_file = PID_FILE;
+char		      * conf_file = CONF_FILE;
 int			max_processes=MAX_CHILD;
 int			max_dbms=MAX_DBMS_CHILD;
 int			max_clients=MAX_CLIENT;
-	
+
+int			sysloglog = 1;
+int	      stderrlog = 0;
+FILE			* errorout;
+
 #define SERVER_NAME	"DBMS-Dirkx/3.00"
 
 int			debug = 0;
 int			verbose = 0;
 int			trace_on = 0;
 
-#define barf(x) { log(L_FATAL,x ":%s",strerror(errno)); exit(1); }
+#define barf(x) { dbms_log(L_FATAL,x ":%s",strerror(errno)); exit(1); }
 
-char *exp[]={
+static char *_exp[]={
 	"**FATAL", "**ERROR", "Warning", " Inform", "verbose", "  bloat", "  debug"
 	};
 
-int lexp[]={
+static int lexp[]={
 	LOG_ALERT, LOG_ERR, LOG_WARNING, LOG_INFO, 
 		LOG_DEBUG,LOG_DEBUG,LOG_DEBUG
 	};
@@ -99,23 +99,28 @@ void
 reply_log(connection * r, int level, char * fmt, ...)
 {
 	char tmp[ 1024 ];
+	char tmp2[ 2*1024 ];
 	va_list	ap;
 	pid_t p = getpid();
 	DBT v;
+	errorout = stderr;
 		
-	if (level<=verbose) {
-	 	snprintf(tmp,1024,"%d:%s %s %s",p,
-			(!mum_pid) ? "Mum" : "Cld",
-			exp[ level - L_FATAL ],
-			fmt);
-
-		va_start(ap,fmt);
-		vsyslog(lexp[ level - L_FATAL ],tmp,ap);					va_end(ap);
-		}
-
 	va_start(ap,fmt);
-	vsnprintf(tmp,1024,fmt,ap);
+	vsnprintf(tmp,sizeof(tmp),fmt,ap);
 	va_end(ap);
+
+	if (level<=verbose) {
+	 	snprintf(tmp2,sizeof(tmp2),"%d:%s %s %s",p,
+			(!mum_pid) ? "Mum" : "Cld",
+			_exp[ level - L_FATAL ],
+			tmp);
+
+		if (sysloglog) 
+			syslog(lexp[ level - L_FATAL ],"%s",tmp2);
+
+		if (stderrlog) 
+			fprintf(errorout,"%s\n",tmp2);
+	}
 
 	v.data = tmp;
 	v.size = strlen(tmp);
@@ -123,22 +128,32 @@ reply_log(connection * r, int level, char * fmt, ...)
 }
 
 void
-log(int level, char * fmt, ...)
+dbms_log(int level, char * fmt, ...)
 {
 	char tmp[ 1024 ];
 	va_list	ap;
 	pid_t p = getpid();
+	errorout = stderr;
 
 	if (level>verbose) 
 		return;	
 
 	snprintf(tmp,1024,"%d:%s %s %s",p,
 		(!mum_pid) ? "Mum" : "Cld",
-		exp[ level - L_FATAL ],
+		_exp[ level - L_FATAL ],
 		fmt);
 
+if (sysloglog) {
 	va_start(ap,fmt);
-	vsyslog(lexp[ level - L_FATAL ],tmp,ap);					va_end(ap);
+	vsyslog(lexp[ level - L_FATAL ],tmp,ap);					
+	va_end(ap);
+}
+if (stderrlog) {
+		va_start(ap,fmt);
+		vfprintf(errorout,tmp,ap);					
+		va_end(ap);
+	   fprintf(errorout,"\n");
+}
 }
 
 void
@@ -146,7 +161,7 @@ trace(char * fmt, ...)
 {
         char tmp[ 1024 ];
         va_list ap;
-	clock_t tt;
+	time_t tt;
 	pid_t p = getpid();
 
 	if (!trace_on) return;
@@ -160,9 +175,10 @@ trace(char * fmt, ...)
                 fmt
 		);
 
-        va_start(ap,fmt);
-        vprintf(tmp,ap);
-        va_end(ap);
+   va_start(ap,fmt);
+   vprintf(tmp,ap);
+   va_end(ap);
+
 	fflush(stdout);
 }    
 
@@ -176,7 +192,7 @@ void loglevel( int i) {
 			cmd_table[i].cnt = 0;
 		};
 
-	log(L_ERROR,"Log level changed by signal to %d",debug);
+	dbms_log(L_ERROR,"Log level changed by signal to %d",debug);
 	}
 
 	
@@ -189,15 +205,15 @@ void dumpie ( int i ) {
 	time_t t=time(NULL);
 	FILE * f;
 	if ((f=fopen(DUMP_FILE,"w"))==NULL) {
-		log(L_ERROR,"Cannot open dbmsd.dump: %s",strerror(errno));
+		dbms_log(L_ERROR,"Cannot open dbmsd.dump: %s",strerror(errno));
 		return;
 		};
 
-	fprintf(f,"# Dump DBMS - pid=%d - %s\n",getpid(),ctime(&t));
+	fprintf(f,"# Dump DBMS - pid=%d - %s\n",(int)getpid(),ctime(&t));
 #ifdef FORKING
 	fprintf(f,"# Children\n");
 	for( c=children; c; c=c->nxt) {
-		fprintf(f," %7p Pid %5d conn=%p fd=%d",
+		fprintf(f," %7p Pid %5d conn=%p fd=%d\n",
 			c,c->pid,c->r,c->r ? c->r->clientfd : -1);
 		for( d=first_dbp; d; d=d->nxt ) if (d->handled_by == c)
 			fprintf(f,"\t%7p %s\n",d,d->name);
@@ -221,6 +237,11 @@ void dumpie ( int i ) {
 	for(i=0; i < sizeof(cmd_table) / sizeof(struct command_req); i++) 
 		fprintf(f," %8s: %d\n",cmd_table[i].info, cmd_table[i].cnt);
 
+#ifdef RDFSTORE_DBMS_DEBUG_MALLOC
+	fprintf(f,"# Memory in use\n");
+	debug_malloc_dump(f);
+#endif
+	fprintf(f,"\n---------\n");
 	fclose(f);
 	};
 
@@ -234,7 +255,7 @@ void childied( int i ) {
 	while((pid=waitpid(-1,&status,WNOHANG))>0) {
 #ifdef FORKING
 		child_rec * c;
-		log(L_INFORM,"Skeduled to zap one of my children pid=%d",pid);
+		dbms_log(L_INFORM,"Skeduled to zap one of my children pid=%d",pid);
 		for(c=children;c;c=c->nxt) 
 			if (c->pid == pid) 
 				c->close = 1; MX;
@@ -243,11 +264,11 @@ void childied( int i ) {
 
 	if ((pid == -1) && ( errno=ECHILD)) {
 #if 0
-		log(L_ERROR,"Gotten CHILD died signal, but no child...");
+		dbms_log(L_ERROR,"Gotten CHILD died signal, but no child...");
 #endif
 		} else
 	if (pid == -1) {
-		log(L_ERROR,"Failed to get deceased PID: %s",strerror(errno));
+		dbms_log(L_ERROR,"Failed to get deceased PID: %s",strerror(errno));
 		} 
 
 	errno=oerrno;
@@ -265,6 +286,10 @@ main( int argc, char * argv[])
 	int 			needed=0;
 	char			* as_user=USER;
 	struct sigaction 	act,oact;
+	in_addr_t 		bound = INADDR_ANY;
+	const char 		* erm;
+
+	errorout = stderr;
 
 	port = PORT;
 
@@ -275,62 +300,107 @@ main( int argc, char * argv[])
 				fprintf(stderr,"Aborted: You really want a port number >1.\n");
 				exit(1);
 				};
-			} else
+		} else
+		if ((!strcmp(argv[i],"-b")) && (i+1<argc)) {
+			char * iface = argv[++i];
+			bound = inet_addr(iface);  /* First treat it as an UP address */
+			if (bound == INADDR_NONE) {
+				/* Not a valid IP address - try to look it up */
+				struct hostent * hp;
+				if((hp = gethostbyname(iface))==NULL) {     
+					perror("Address to listen on not found");
+					exit(1);
+                        	};
+                		bound = *(u_long *) hp->h_addr;
+			}
+		} else
 		if ((!strcmp(argv[i],"-d")) && (i+1<argc)) {
 			my_dir = argv[++i];
 			} else
 		if ((!strcmp(argv[i],"-u")) && (i+1<argc)) {
 			as_user= argv[++i];
-			} else
+		} else
 		if (!strcmp(argv[i],"-U")) {
 			as_user= NULL;
-			} else
+		} else
+		if ((!strcmp(argv[i],"-C")) && (i+1<argc)) {
+			conf_file = argv[++i];
+			if ((erm=parse_config(conf_file))) {
+                                fprintf(stderr,"Aborted: %s\n",erm);
+                                exit(1);
+                        }; 
+			printf("Config file parsed OK\n");
+			exit(0);
+		} else
+		if ((!strcmp(argv[i],"-c")) && (i+1<argc)) {
+			conf_file = argv[++i];
+		} else
 		if ((!strcmp(argv[i],"-P")) && (i+1<argc)) {
 			pid_file= argv[++i];
-			} else
+		} else
 		if ((!strcmp(argv[i],"-n")) && (i+1<argc)) { 
 			max_processes = atoi( argv[ ++i ] );
 			if ((max_processes < 1) || (max_processes > MAX_CHILD)) {
 				fprintf(stderr,"Aborted: Max Number of child processes must be between 1 and %d\n",MAX_CHILD);
 				exit(1);
 				};
-			} else
+		} else
 		if ((!strcmp(argv[i],"-m")) && (i+1<argc)) { 
 			max_dbms = atoi( argv[ ++i ] );
 			if ((max_dbms < 1) || (max_dbms > MAX_DBMS)) {
 				fprintf(stderr,"Aborted: Max Number of DB's must be between 1 and %d\n",MAX_DBMS);
 				exit(1);
 				};
-			} else
+		} else
 		if ((!strcmp(argv[i],"-C")) && (i+1<argc)) { 
 			max_clients = atoi( argv[ ++i ] );
 			if ((max_clients < 1) || (max_clients> MAX_CLIENT)) {
 				fprintf(stderr,"Aborted: Max Number of children must be between 1 and %d\n",MAX_CLIENT);
 				exit(1);
 				};
-			} else
+		} else
 		if (!strcmp(argv[i],"-x")) {
 			verbose++; debug++; 
 			if (debug>2) dtch = 0;
-			} else
-		if (!strcmp(argv[i],"-c")) {
+		} else
+		if (!strcmp(argv[i],"-D")) {
 			dtch = 0;
-			} else
+		} else
 		if (!strcmp(argv[i],"-t")) {
 			trace_on= 1;
-			} else
+		} else
 		if (!strcmp(argv[i],"-v")) {
 			printf("%s\n",get_full());
+			printf("Max clients:	%d\n",MAX_CLIENT);
+			printf("Max DBs:	%d\n",MAX_DBMS);
+			printf("Max Children:	%d\n",MAX_CHILD);
+			printf("Max Payload:	%d bytes\n",MAX_PAYLOAD);
+			printf("Default dir:	%s\n",DIR_PREFIX);
+			printf("Default config:	%s\n",CONF_FILE);
 			exit(0);
-			} else
+		} else
 		if (!strcmp(argv[i],"-X")) {
-			verbose=debug=100; dtch = 0;
-			} else
-		{ 	
-			fprintf(stderr,"Syntax: %s [-P <pid-file>] [-d <directory_prefix>] [-p <port>] [-x] [-n <max children>] [-m <max databases>] [-C <max clients>]\n",argv[0]);
+			verbose=debug=100; dtch = 0; sysloglog = 0; stderrlog = 1;
+	   } else
+		if ((!strcmp(argv[i],"-e")) && (i+1<argc)) {
+	      stderrlog = 1;
+		   if ((errorout = fopen(argv[++i],"a")) == NULL) {
+				fprintf(stderr,"Aborted. Cannot open logfile %s for writing: %s\n",
+						argv[i],strerror(errno));
+				exit(1);
+		   };
+		} else
+		if (!strcmp(argv[i],"-E")) {
+	      stderrlog = 1;
+		} else { 	
+			fprintf(stderr,"Syntax: %s [-U | -u <userid>] [-E] [-P <pid-file>] [-d <directory_prefix>] [-b <ip to bind to>] [-p <port>] [-x] [-n <max children>] [-m <max databases>] [-C <max clients>] <-c conffile>\n",argv[0]);
 			exit(1);
 			};
 		};
+	if ((erm=parse_config(conf_file))) {
+               	fprintf(stderr,"Aborted: %s\n",erm);
+        	exit(1);
+        }
 
 	if (HARD_MAX_CLIENTS < max_clients +3) {
 		fprintf(stderr,"Aborted: Max number of clients larger than compiled hard max(%d)\n",HARD_MAX_CLIENTS);
@@ -352,6 +422,7 @@ main( int argc, char * argv[])
 		exit(1);
 		};
 
+#ifndef RDFSTORE_PLATFORM_SOLARIS
      	if (getrlimit(RLIMIT_NPROC,&l)==-1) 
 		barf("Could not obtain limit on children\n");
 
@@ -359,7 +430,10 @@ main( int argc, char * argv[])
 		fprintf(stderr,"Aborted: Resource limit imposes on number of children too limiting\n");
 		exit(1);
 		};
-	openlog("dbms",LOG_LOCAL4, LOG_PID | LOG_CONS);
+#endif
+
+	if (sysloglog)
+		openlog("dbms",LOG_LOCAL4, LOG_PID | LOG_CONS);
 
 	if ( (sockfd = socket( AF_INET, SOCK_STREAM, 0))<0 ) 
 		barf("Cannot open socket");
@@ -385,11 +459,11 @@ main( int argc, char * argv[])
 
 	bzero( (char *) &server,sizeof(server) );
 	server.sin_family	= AF_INET;
-	server.sin_addr.s_addr	= htonl( INADDR_ANY );
+	server.sin_addr.s_addr	= bound;		/* Already in network order. */
 	server.sin_port		= htons( port );
 
 	if ( (bind( sockfd, ( struct sockaddr *) &server, sizeof (server)))<0 )
-		barf("Cannot bind to local machine");
+		barf("Cannot bind server to (lcoal) address.");
 
 	/* Allow for a que.. */
 	if ( listen(sockfd,MAX_QUEUE)<0 ) 
@@ -461,7 +535,7 @@ main( int argc, char * argv[])
 	maxfd=sockfd;
 	client_list=NULL;
 
-	log(L_INFORM,"Waiting for connections");
+	dbms_log(L_INFORM,"Waiting for connections");
 
 	signal(SIGHUP,dumpie);
 	signal(SIGUSR1,loglevel);
@@ -473,7 +547,7 @@ main( int argc, char * argv[])
 #ifdef FORKING
 	signal(SIGCHLD,childied); 
 #endif
-	mum_fd = 0;
+	mum = NULL;
 
 	trace("Tracing started\n");
 

@@ -1,5 +1,6 @@
 # *
-# *	Copyright (c) 2000 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
 # *
@@ -7,8 +8,7 @@
 # * file you should have received together with this source code. If you did not get a
 # * a copy of such a license agreement you can pick up one at:
 # *
-# *     http://rdfstore.jrc.it/LICENSE
-# *
+# *     http://rdfstore.sourceforge.net/LICENSE
 # *
 
 package RDFStore::VirtualModel;
@@ -20,9 +20,8 @@ $VERSION = '0.4';
 
 use Carp;
 use RDFStore::Model;
-use RDFStore::Stanford::VirtualModel;
 
-@RDFStore::VirtualModel::ISA = qw( RDFStore::Model RDFStore::Stanford::VirtualModel );
+@RDFStore::VirtualModel::ISA = qw( RDFStore::Model );
 
 sub new {
 	my ($pkg) = shift;
@@ -48,11 +47,11 @@ RDFStore::VirtualModel - implementation of the VirtualModel RDF API
 
 =head1 DESCRIPTION
 
-An RDFStore::Stanford::VirtualModel implementation using RDFStore::Model and Digested URIs.
+An RDFStore::VirtualModel implementation using RDFStore::Model and Digested URIs.
 
 =head1 SEE ALSO
 
-RDFStore::Stanford::VirtualModel(3) RDFStore::Model(3) Digest(3) and RDFStore::SchemaModel(3)
+RDFStore::Model(3) Digest(3) and RDFStore::SchemaModel(3)
 
 =head1 AUTHOR
 
