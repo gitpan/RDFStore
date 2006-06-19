@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: backend_caching_store.c,v 1.10 2004/08/19 18:57:12 areggiori Exp $
+# $Id: backend_caching_store.c,v 1.13 2006/06/19 10:10:21 areggiori Exp $
 */
 #include "dbms.h"
 #include "dbms_compat.h"
@@ -166,7 +166,7 @@ typedef struct caching_store_rec {
 	/* Create a copy into existence, or drop it. */
 	int (*dup)(void * conf, void * from, void * * to);	/* malloc and cpy */
 	int (*cpy)(void * conf, void * from, void * to);	/* just copy refs */
-	int (*drp)(void * conf, void * data);
+	int (*drp)(backend_caching_t * me, void * conf, void * data);
 	
 	} caching_store_t;
 
@@ -186,14 +186,14 @@ static int init_cachingstore(
 	int (*delete)(void * conf, void * data),
 	int (*dup)(void * conf, void * from, void * * to),
 	int (*cpy)(void * conf, void * from, void * to),
-	int (*drp)(void * conf, void * data),
-        void (* free)(void * adr),
-        void * (* malloc)(size_t size)
+	int (*drp)(backend_caching_t * me, void * conf, void * data),
+        void (* cachingfree)(void * adr),
+        void * (* cachingmalloc)(size_t size)
 	)
 {
 	me->maxcache = max_cache_nelems ? max_cache_nelems : DEFAULTMAXCACHE;
 
-	me->idx = (cdll_t **) malloc( sizeof((*(me->idx))) * me->maxcache );
+	me->idx = (cdll_t **) (*cachingmalloc)( sizeof((*(me->idx))) * me->maxcache );
 	if (me->idx == NULL)
 		return -1;
 
@@ -211,11 +211,14 @@ static int init_cachingstore(
 	me->dup = dup;
 	me->cpy = cpy;
 	me->drp = drp;
-	me->name = strdup(name);
+	me->name = (char *)(*cachingmalloc)( strlen(name)+1 );
+	if( me->name == NULL )
+		return -1;
+	strcpy( me->name, name );
 	me->conf = conf;
 
-	me->free = free;
-	me->malloc = malloc;
+	me->free = cachingfree;
+	me->malloc = cachingmalloc;
 
 	return 0;
 }
@@ -237,7 +240,7 @@ const char * _x(DBT v) {
 	return (char *)(v.data);
 }
 
-int cachekey(caching_store_t * me, void * data, void ** out, bc_ops op) 
+int cachekey(backend_caching_t * mme, caching_store_t * me, void * data, void ** out, bc_ops op) 
 {
 	cdll_t * * i = NULL;
 	int e = 0;
@@ -274,7 +277,7 @@ fprintf(stderr,"Cache miss\n");
 
 			/* allow the backend to store and drop it */
 			me->store(me->conf,last->data);
-			me->drp(me->conf,last->data);
+			me->drp(mme, me->conf,last->data);
 			me->drop++;
 		} else {
 			/* Still space - add it to the end of the IDX */
@@ -352,7 +355,7 @@ fprintf(stderr,"Cache hit\n");
 if (0) fprintf(stderr,"Write through\n");
 if (0) if (((data_t *)data)->val.size == 4) fprintf(stderr,"%s == %d\n",_x(((data_t *)data)->key),*((int *)(((data_t *)data)->val.data)));
 
-			me->drp(me->conf, (*i)->data);		/* drop the old value */
+			me->drp(mme, me->conf, (*i)->data);		/* drop the old value */
 			me->dup(me->conf, data, &((*i)->data));	/* replace by the new one */
 			break;
 		case BC_DELETE:
@@ -394,7 +397,7 @@ void stats(caching_store_t *me)
 	fprintf(stderr,"%s: hit: %d miss: %d drop: %d\n",me->name,me->hit,me->miss,me->drop);
 }
 
-void purgecache(caching_store_t *c) 
+void purgecache(backend_caching_t   *me, caching_store_t *c) 
 {
 	cdll_t * p;
 	if (c->head == NULL)
@@ -404,8 +407,8 @@ void purgecache(caching_store_t *c)
 		cdll_t * q = p;
 		p=p->nxt;
 		c->store(c->conf,q->data);
-		c->drp(c->conf,q->data);
-		free(q);
+		c->drp(me, c->conf,q->data);
+		(*(me->free))(q);
 		if (p == c->head)
 			break;
 	}
@@ -578,14 +581,14 @@ if (0) fprintf(stderr,"DUPed %s(%d,%d)==%s(%d,%d) exists=%d/%d\n",
 	return 0;
 }
 
-static int _drp(void * conf, void * data)
+static int _drp(backend_caching_t * me, void * conf, void * data)
 {
 	data_t * p = (data_t *) data;
 	if (p->key.data) 
-		free(p->key.data);
+		(*(me->free))(p->key.data);
 	if (p->val.data) 
-		free(p->val.data);
-	free(p);
+		(*(me->free))(p->val.data);
+	(*(me->free))(p);
 	return 0;
 }
 
@@ -661,7 +664,8 @@ backend_caching_open(
 		  void *(*_my_malloc) (size_t size),
 		  void (*_my_free) (void *),
 		  void (*_my_report) (dbms_cause_t cause, int count),
-		  void (*_my_error) (char *err, int erx)
+		  void (*_my_error) (char *err, int erx),
+		  int bt_compare_fcn_type
 )
 {
 	backend_caching_t   **mme = (backend_caching_t **) emme;
@@ -693,7 +697,10 @@ backend_caching_open(
 		dir ? dir : "<nodir>",
 		name ? name : "<inmemory>"
 	);
-	me->name = strdup(buff);
+	me->name = (char *)(*_my_malloc)( strlen(buff)+1 );
+	if( me->name == NULL )
+		return -1;
+	strcpy( me->name, buff );
 
 	me->malloc = _my_malloc;
 	me->free = _my_free;
@@ -719,7 +726,8 @@ backend_caching_open(
         err = (*(me->store->open)) (
                                 remote & 0xF, ro, (void **) &(me->instance),
                                 dir, name, local_hash_flags, host, port,
-                               _my_malloc, _my_free, _my_report, _my_error
+                               _my_malloc, _my_free, _my_report, _my_error,
+				bt_compare_fcn_type
         );
         if (err) {
                 (*_my_free) (me);
@@ -760,7 +768,7 @@ backend_caching_close(
 	backend_caching_t   *me = (backend_caching_t *) eme;
 	int e;
 if (0) fprintf(stderr,"%s: close\n",me->name);
-	purgecache(me->cache);
+	purgecache(me, me->cache);
 	stats(me->cache);
 	e = (me->store->close)(me->instance);
 
@@ -793,7 +801,7 @@ fprintf(stderr,"%s: fetch %s(%d,%d)\n",me->name,_x(key),(int)key.size,(int)val->
 	d.val.size = 0;
 	d.state = UNDEF;	/* unkown */
 
-	if ((e = cachekey(me->cache,&d,(void **)&out, BC_READ))) {
+	if ((e = cachekey(me, me->cache,&d,(void **)&out, BC_READ))) {
 		return e;
 	}
 
@@ -843,7 +851,7 @@ backend_caching_store(
         d.val = val;
         d.state = CHANGED;   
 
-	e = cachekey(me->cache,&d,NULL,BC_WRITE);
+	e = cachekey(me, me->cache,&d,NULL,BC_WRITE);
 #if 0
 fprintf(stderr,"%s: store %s(%d,%d) E=%d\n",me->name,_x(key),(int)key.size,(int)val.size,e);
 #endif
@@ -880,7 +888,7 @@ backend_caching_exists(
 	d.val.size = 0;
 	d.state = UNDEF;	/* unkown */
 
-	e = cachekey(me->cache,&d,NULL, BC_EXISTS);
+	e = cachekey(me, me->cache,&d,NULL, BC_EXISTS);
 
 if (0) fprintf(stderr,"%s: exists %s ==> e=%d and d.exists=%d\n",me->name,_x(key),e,d.state);
 
@@ -905,7 +913,7 @@ if (0) fprintf(stderr,"%s: delete\n",me->name);
 	memset(&(d.val),0,sizeof(d.val));
 	d.state = UNDEF;
 	
-	return cachekey(me->cache,&d,NULL, BC_DELETE);
+	return cachekey(me, me->cache,&d,NULL, BC_DELETE);
 };
 
 rdfstore_flat_store_error_t
@@ -920,6 +928,19 @@ assert(0);
 }
 
 rdfstore_flat_store_error_t
+backend_caching_from(
+		   void *eme,
+		   DBT closest_key,
+		   DBT * key
+)
+{
+	backend_caching_t   *me = (backend_caching_t *) eme;
+if (0) fprintf(stderr,"%s: from\n",me->name);
+	purgecache(me, me->cache);
+	return (me->store->from)(me->instance,closest_key,key);
+}
+
+rdfstore_flat_store_error_t
 backend_caching_first(
 		   void *eme,
 		   DBT * first_key
@@ -927,7 +948,7 @@ backend_caching_first(
 {
 	backend_caching_t   *me = (backend_caching_t *) eme;
 if (0) fprintf(stderr,"%s: first\n",me->name);
-	purgecache(me->cache);
+	purgecache(me, me->cache);
 	return (me->store->first)(me->instance,first_key);
 }
 
@@ -940,7 +961,7 @@ backend_caching_next(
 {
 	backend_caching_t   *me = (backend_caching_t *) eme;
 if (0) fprintf(stderr,"%s: next\n",me->name);
-	purgecache(me->cache);
+	purgecache(me, me->cache);
 	return (me->store->next)(me->instance,previous_key,next_key);
 }
 
@@ -1015,7 +1036,7 @@ backend_caching_sync(
 {
 	backend_caching_t   *me = (backend_caching_t *) eme;
 if (0) fprintf(stderr,"%s: sync\n",me->name);
-	purgecache(me->cache);
+	purgecache(me, me->cache);
 	return (me->store->sync)(me->instance);
 }
 

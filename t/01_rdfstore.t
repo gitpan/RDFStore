@@ -1,7 +1,7 @@
 use strict;
 use Carp;
  
-BEGIN { print "1..252\n"; };
+BEGIN { print "1..300\n"; };
 END { print "not ok 1\n" unless $::loaded; RDFStore::debug_malloc_dump(); eval{ rmtree('cooltest'); }; };
 
 sub ok
@@ -215,34 +215,42 @@ ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Las
 ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("http://description.org/schema/", "Creator"), new RDFStore::Resource("art") ));
 ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("http://description.org/schema/", "Creator"), new RDFStore::Literal("art and handycraft") ));
 ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("http://description.org/schema/", "Creator"), new RDFStore::Resource("art and handycraft") ));
-ok $tt++, ($iterator = $rdfstore->search( 	0, #search_type			[1]
-					 	0, #subjects operator (0=OR)	[2]
-						1, #one subject			[3]
-						0, #predicates operator (0=OR)	[4]
-						0, #zero predicates		[5]
-						0, #objects operator (0=OR)	[6]
-						1, #one object			[7]
-						0, #contexts operator (0=OR)	[8]
-						0, #zero contexts		[9]
-						0, #langs operator (0=OR)	[10]
-						0, #zero xml:lang		[11]
-						0, #dts operator (0=OR)	        [12]
-						0, #zero rdf:datatype		[13]
-						0, #words operator (0=OR)	[14]
-						0, #no free-text search		[15]
-						new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Literal("art") ));
+
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"o" => [ new RDFStore::Literal("art") ],
+						} ));
 ok $tt++, ($iterator->size == 1);
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("art") ));
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"o" => [ new RDFStore::Resource("art") ],
+						} ));
 ok $tt++, ($iterator->size == 1);
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Literal("art and handycraft") ));
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"o" => [ new RDFStore::Literal("art and handycraft") ],
+						} ));
 ok $tt++, ($iterator->size == 1);
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), 'art' ));
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"words" => [ "art" ],
+						"words_op" => "and",
+						} ));
 ok $tt++, ($iterator->size == 2);
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), 'art','and','handycraft' ));
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"words" => [ 'art','and','handycraft' ],
+						} ));
 ok $tt++, ($iterator->size == 3);
 
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ));
-ok $tt++, ($iterator = $rdfstore->search( 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), 'This','Alberto' )); # Alberto
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						} ));
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"s" => [ new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator") ],
+						"words" => [ "This", "Alberto" ],
+						"words_op" => "and",
+						} ));
 ok $tt++, ($iterator->size == 1);
 
 eval {
@@ -361,3 +369,41 @@ for (	my $s = $iterator3->first;
 #die if ($i <=> $iterator3->size);
 };
 ok $tt++, !$@;
+
+# integer range searches
+for my $i ( qw{ 1 11 22 111 123 222 1111 2222 33 3333 } ) {
+	ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("http://description.org/schema/", "value"), new RDFStore::Literal( $i ) ));
+	};
+
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"ranges" => [ "33" ],
+						"ranges_op" => "a > b"
+						} ));
+#print $iterator->size."\n";
+ok $tt++, ($iterator->size == 6);
+
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"ranges" => [ "33" ],
+						"ranges_op" => "a != b"
+						} ));
+#print $iterator->size."\n";
+ok $tt++, ($iterator->size == 9);
+
+# date range searches
+for my $i ( 1..30 ) {
+	ok $tt++, ($rdfstore->insert( new RDFStore::Resource("http://www.w3.org/Home/Lassila/", "Creator"), new RDFStore::Resource("http://description.org/schema/", "date"), new RDFStore::Literal( "2004-11-".sprintf("%02d",$i),0, undef, "http://www.w3.org/2001/XMLSchema#date"  ) ));
+	};
+
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"ranges" => [ "2004-11-15" ],
+						"ranges_op" => "a < b"
+						} ));
+#print $iterator->size."\n";
+ok $tt++, ($iterator->size == 14);
+
+ok $tt++, ($iterator = $rdfstore->search(	{
+						"ranges" => [ "2004-11-10", "2004-11-15" ],
+						"ranges_op" => "a < b < c"
+						} ));
+#print $iterator->size."\n";
+ok $tt++, ($iterator->size == 4);

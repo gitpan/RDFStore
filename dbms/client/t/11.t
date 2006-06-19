@@ -28,7 +28,7 @@ $noot = 'noot'.$$;
 
 # 2 
 $test++;
-tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT and print "ok $test\n" or die $!;
+tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT,0 and print "ok $test\n" or die $!;
 
 
 # 3
@@ -117,8 +117,8 @@ for $child ( 1 .. $nfork ) {
 	if (fork() == 0) {
   	    if (fork() == 0) {
 		@k=();
-		tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT or die;
-		tie %aap2, 'DBMS','tiepje'.$$,&DBMS::XSMODE_CREAT or die;
+		tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT,0 or die;
+		tie %aap2, 'DBMS','tiepje'.$$,&DBMS::XSMODE_CREAT,0 or die;
 		for $i ( 1 .. $nft ) {
 			$k = $i.$$.'hello';	
 			$aap{ $k } = $i.$$;
@@ -145,7 +145,7 @@ do {
 wait;
 };
 
-tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT;
+tie %aap, 'DBMS','tiepje',&DBMS::XSMODE_CREAT,0;
 $trans += $nfork * $nft;
 $test += $nfork;
 

@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -47,6 +47,7 @@ typedef struct {
         int mode;
         int sockfd;
         unsigned long addr;
+	int bt_compare_fcn_type;
 
 	void * (* malloc)(size_t s);
 	void (* free)(void * adr);
@@ -69,7 +70,8 @@ dbms_connect(
         void *(*_my_malloc)( size_t size),
         void(*_my_free)(void *),
         void(*_my_report)(dbms_cause_t cause, int count),
-	void(*_my_error)(char * err, int erx)
+	void(*_my_error)(char * err, int erx),
+	int bt_compare_fcn_type
 );
 
 extern dbms_error_t

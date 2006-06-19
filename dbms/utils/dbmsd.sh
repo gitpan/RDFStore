@@ -1,6 +1,6 @@
 #!/bin/sh
 ##############################################################################
-#       Copyright (c) 2000-2004 All rights reserved
+#       Copyright (c) 2000-2006 All rights reserved
 #       Alberto Reggiori <areggiori@webweaving.org>
 #       Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -86,7 +86,7 @@ LOGFILE=$DIR/logs/dbmsd_errorlog
 #
 cd $RUNDIR || exit 1
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/BerkeleyDB-4.2.52/lib/
+#export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/BerkeleyDB-4.0.14/lib
 
 [ -f $DIR/bin/dbmsd ] && $DIR/bin/dbmsd -e $LOGFILE -U -P $PIDFILE -d $DIR/dbms && echo -n dbmsd
 

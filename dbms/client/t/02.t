@@ -8,7 +8,7 @@ no strict;
 
 foreach my $ci (1 .. 4) {
 	undef $DBMS::ERROR;
-	my $a=tie %aap, 'DBMS','zappazoink',&DBMS::XSMODE_CREAT 
+	my $a=tie %aap, 'DBMS','zappazoink',&DBMS::XSMODE_CREAT,0
 		or die "E= $DBMS::ERROR $! $@ $?";
 
 	for $i (1 .. $N) {

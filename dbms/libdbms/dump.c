@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2003 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -83,7 +83,7 @@ int main(int argc, char * * argv)
 	};
 
  	if (!(d = dbms_connect(argv[argc-1], NULL, 0, 
-		DBMS_XSMODE_RDONLY, NULL, NULL, NULL, NULL))) 
+		DBMS_XSMODE_RDONLY, NULL, NULL, NULL, NULL, 0))) 
 	{
 		fprintf(stderr,"Failed to connect\n");
 		exit(1);

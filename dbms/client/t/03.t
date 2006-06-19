@@ -7,7 +7,7 @@ use DBMS;
 no strict;
 undef $DBMS::ERROR;
 
-my $a=tie %aap, 'DBMS','zappazoink',&DBMS::XSMODE_CREAT 
+my $a=tie %aap, 'DBMS','zappazoink',&DBMS::XSMODE_CREAT,0
 	or die "E= $DBMS::ERROR $! $@ $?";
 
 foreach my $ci (1 .. 100) {

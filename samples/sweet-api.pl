@@ -11,7 +11,7 @@ my $factory = new RDFStore::NodeFactory();
 my $p=new RDFStore::Parser::SiRPAC(
 		Style => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory =>          $factory,
-                store   => { options => { FreeText => 1 } } ); # by default free-text indexing of literals is not done i.e. faster :)
+                style_options   => { store_options => { FreeText => 1 } } ); # by default free-text indexing of literals is not done i.e. faster :)
 
 my $model = $p->parsefile("http://sweet.jpl.nasa.gov/sweet/humanactivities.daml");
 
@@ -45,7 +45,7 @@ while ( my $st = $iterator->each ) {
 my $p1=new RDFStore::Parser::SiRPAC(
 		Style => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory =>          $factory,
-                store   => { options => { Name => 'daml', Sync => 1, FreeText => 1 } } ); # which stores *on disk* the BDB files in the subdir daml/
+                style_options   => { store_options => { Name => 'daml', Sync => 1, FreeText => 1 } } ); # which stores *on disk* the BDB files in the subdir daml/
 
 my $model1 = $p1->parsefile("http://sweet.jpl.nasa.gov/sweet/humanactivities.daml");
 

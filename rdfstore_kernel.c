@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004 All rights reserved,
+ * Copyright (c) 2000-2006 All rights reserved,
  *       Alberto Reggiori <areggiori@webweaving.org>,
  *       Dirk-Willem van Gulik <dirkx@webweaving.org>.
  * 
@@ -54,7 +54,7 @@
  * part is based on software originally written by Dirk-Willem van Gulik for
  * Web Weaving Internet Engineering m/v Enschede, The Netherlands.
  * 
- * $Id: rdfstore_kernel.c,v 1.88 2004/08/19 18:57:14 areggiori Exp $
+ * $Id: rdfstore_kernel.c,v 1.113 2006/06/19 10:10:21 areggiori Exp $
  * 
  */
 
@@ -82,6 +82,7 @@
 #include "rdfstore_digest.h"
 #include "rdfstore_bits.h"
 #include "rdfstore_utf8.h"
+#include "rdfstore_xsd.h"
 
 /*
 #define MX	{ printf(" MX %s:%d - %p\n",__FILE__,__LINE__,me->nindex->free); }
@@ -101,6 +102,12 @@
 /*
  * #define RDFSTORE_CONNECTIONS_REINDEXING
  */
+
+char * rdfstore_get_version (
+        rdfstore * me
+        ) {
+        return VERSION;
+        };
 
 int
 rdfstore_connect(
@@ -148,6 +155,9 @@ rdfstore_connect(
 #endif
 	me->languages = NULL;
 	me->datatypes = NULL;
+	me->xsd_integer = NULL;
+	me->xsd_double = NULL;
+	me->xsd_date = NULL;
 	me->contexts = NULL;
 	me->freetext = 0;
 	me->statements = NULL;
@@ -228,9 +238,46 @@ rdfstore_connect(
 				        &me->model,
 				        name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/model"), 
 					(unsigned int)(32 * 1024), host, port,
-				     	_mmalloc, _mfree, _mcallback, _merror);
+				     	_mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) 
 		goto exitandclean;
+
+	/* check indexing version first or croak */
+	key.data = RDFSTORE_INDEXING_VERSION_KEY;
+	key.size = sizeof(RDFSTORE_INDEXING_VERSION_KEY);
+	if ((rdfstore_flat_store_fetch(me->model, key, &data)) != 0) {
+		if (!(me->flag)) {
+			data.data = RDFSTORE_INDEXING_VERSION;
+			data.size = strlen(RDFSTORE_INDEXING_VERSION) + 1;
+			err = rdfstore_flat_store_store(me->model, key, data);
+			if ((err != 0) &&
+			    (err != FLAT_STORE_E_KEYEXIST)) {
+				perror("rdfstore_connect");
+				fprintf(stderr,"Could not store '%d' bytes for key '%s' in table model for store '%s': %s\n", (int)data.size, (char *)key.data, (char *)data.data, rdfstore_flat_store_get_error(me->model));
+
+				goto exitandclean;
+				};
+		} else {
+			if(	(name != NULL) &&
+				(strlen(name) > 0) ) {
+				perror("rdfstore_connect");
+				fprintf(stderr,"Incompatible RDF database indexing version. This is version %s. You need to upgrade your database; dump your data, remove old database and re-ingest data.\n", RDFSTORE_INDEXING_VERSION );
+				goto exitandclean;
+				};
+			};
+		strcpy(me->version, RDFSTORE_INDEXING_VERSION);
+	} else {
+		/* just croak if different version for the moment */
+		if (strncmp(	RDFSTORE_INDEXING_VERSION,
+				data.data, data.size )) {
+			perror("rdfstore_connect");
+			fprintf(stderr,"Incompatible RDF database indexing version %s. This is version %s. You need to upgrade your database; dump your data, remove old database and re-ingest data.\n", (char *)data.data, RDFSTORE_INDEXING_VERSION );
+			goto exitandclean;
+			};
+		strcpy(me->version, data.data);
+		RDFSTORE_FREE(data.data);
+		};
 
 	if ((name != NULL) &&
 	    (strlen(name) > 0)) {
@@ -259,10 +306,11 @@ rdfstore_connect(
 									 * wrong but we avoid
 									 * bother of ending
 									 * slashes ;-) */
+				RDFSTORE_FREE(data.data);
 				perror("rdfstore_connect");
 				fprintf(stderr,"It seems you have got the wrong store name '%s' instead of '%s'\n", name, (char *)data.data);
 				goto exitandclean;
-			};
+				};
 			strcpy(me->name, data.data);
 			RDFSTORE_FREE(data.data);
 		};
@@ -357,7 +405,8 @@ rdfstore_connect(
 				       flags,
 				       &me->nodes,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/nodes"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -365,7 +414,8 @@ rdfstore_connect(
 				       flags,
 				       &me->subjects,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/subjects"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -373,7 +423,8 @@ rdfstore_connect(
 				       flags,
 				       &me->predicates,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/predicates"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -381,7 +432,8 @@ rdfstore_connect(
 				       flags,
 				       &me->objects,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/objects"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -389,7 +441,8 @@ rdfstore_connect(
 				       flags,
 				       &me->contexts,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/contexts"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -398,7 +451,8 @@ rdfstore_connect(
 				       flags,
 				       &me->s_connections,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/s_connections"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0 );
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -406,7 +460,8 @@ rdfstore_connect(
 				       flags,
 				       &me->p_connections,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/p_connections"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0 );
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -414,7 +469,8 @@ rdfstore_connect(
 				       flags,
 				       &me->o_connections,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/o_connections"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0 );
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -424,7 +480,8 @@ rdfstore_connect(
 				       flags,
 				       &me->languages,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/languages"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0 );
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -433,7 +490,41 @@ rdfstore_connect(
 				       flags,
 				       &me->datatypes,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/datatypes"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0 );
+	if (err != 0) {
+		 goto exitandclean;
+	};
+
+	/* special table for integers */
+	err = rdfstore_flat_store_open(remote,
+				       flags,
+				       &me->xsd_integer,
+				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/xsd_integer"), (unsigned int)(32 * 1024), host, port,
+				     _mmalloc, _mfree, _mcallback, _merror,
+					FLAT_STORE_BT_COMP_INT );
+	if (err != 0) {
+		 goto exitandclean;
+	};
+
+	/* special table for doubles */
+	err = rdfstore_flat_store_open(remote,
+				       flags,
+				       &me->xsd_double,
+				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/xsd_double"), (unsigned int)(32 * 1024), host, port,
+				     _mmalloc, _mfree, _mcallback, _merror,
+					FLAT_STORE_BT_COMP_DOUBLE );
+	if (err != 0) {
+		 goto exitandclean;
+	};
+
+	/* special table for dates */
+	err = rdfstore_flat_store_open(remote,
+				       flags,
+				       &me->xsd_date,
+				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/xsd_date"), (unsigned int)(32 * 1024), host, port,
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0); /* I guess lexicographical order for xsd:date and xsd:dateTime should work */
 	if (err != 0) {
 		 goto exitandclean;
 	};
@@ -443,7 +534,8 @@ rdfstore_connect(
 					       flags,
 					       &me->windex,
 					       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/windex"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0); /* might be default lexicographical order for words is not UTF-8 safe? yeah..... */
 		if (err != 0) {
 		 	goto exitandclean;
 		};
@@ -453,7 +545,8 @@ rdfstore_connect(
 				       flags,
 				       &me->statements,
 				       name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/statements"), (unsigned int)(32 * 1024), host, port,
-				     _mmalloc, _mfree, _mcallback, _merror);
+				     _mmalloc, _mfree, _mcallback, _merror,
+					0);
 	if (err != 0) {
 		goto exitandclean;
 	};
@@ -518,7 +611,7 @@ rdfstore_connect(
 	};
 
 	me->cursor->store = me;
-	/* bzero(me->cursor->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)); */
+	/* bzero(me->cursor->ids,sizeof(unsigned char)*(RDFSTORE_MAXRECORDS_BYTES_SIZE)); */
 	me->cursor->remove_holes = 0;	/* reset the total of holes */
 	me->cursor->st_counter = 0;
 	if ((me->name != NULL) &&
@@ -561,6 +654,12 @@ rdfstore_connect(
 			rdfstore_flat_store_sync(me->languages);
 		if (me->datatypes)
 			rdfstore_flat_store_sync(me->datatypes);
+		if (me->xsd_integer)
+			rdfstore_flat_store_sync(me->xsd_integer);
+		if (me->xsd_double)
+			rdfstore_flat_store_sync(me->xsd_double);
+		if (me->xsd_date)
+			rdfstore_flat_store_sync(me->xsd_date);
 		if (me->freetext)
 			rdfstore_flat_store_sync(me->windex);
 		rdfstore_flat_store_sync(me->statements);
@@ -633,6 +732,18 @@ exitandclean:
 		if (!(me->flag)) rdfstore_flat_store_sync(me->datatypes);
 		rdfstore_flat_store_close(me->datatypes);
 		};
+	if (me->xsd_integer) {
+		if (!(me->flag)) rdfstore_flat_store_sync(me->xsd_integer);
+		rdfstore_flat_store_close(me->xsd_integer);
+		};
+	if (me->xsd_double) {
+		if (!(me->flag)) rdfstore_flat_store_sync(me->xsd_double);
+		rdfstore_flat_store_close(me->xsd_double);
+		};
+	if (me->xsd_date) {
+		if (!(me->flag)) rdfstore_flat_store_sync(me->xsd_date);
+		rdfstore_flat_store_close(me->xsd_date);
+		};
 	if (me->windex) {
 		if (!(me->flag)) rdfstore_flat_store_sync(me->windex);
 		rdfstore_flat_store_close(me->windex);
@@ -690,6 +801,12 @@ MX;
 			rdfstore_flat_store_sync(me->languages);
 		if (me->datatypes)
 			rdfstore_flat_store_sync(me->datatypes);
+		if (me->xsd_integer)
+			rdfstore_flat_store_sync(me->xsd_integer);
+		if (me->xsd_double)
+			rdfstore_flat_store_sync(me->xsd_double);
+		if (me->xsd_date)
+			rdfstore_flat_store_sync(me->xsd_date);
 		if (me->freetext)
 			rdfstore_flat_store_sync(me->windex);
 		if (me->contexts)
@@ -724,6 +841,12 @@ MX;
 		rdfstore_flat_store_close(me->languages);
 	if (me->datatypes)
 		rdfstore_flat_store_close(me->datatypes);
+	if (me->xsd_integer)
+		rdfstore_flat_store_close(me->xsd_integer);
+	if (me->xsd_double)
+		rdfstore_flat_store_close(me->xsd_double);
+	if (me->xsd_date)
+		rdfstore_flat_store_close(me->xsd_date);
 	if (me->freetext)
 		rdfstore_flat_store_close(me->windex);
 	rdfstore_flat_store_close(me->statements);
@@ -797,6 +920,126 @@ rdfstore_size(
 	return 0;
 };
 
+/* try to be as lightweight as possible here without requiring full-blown rdfstore connections, but just one to model */
+int rdfstore_if_modified_since (
+        char * name,
+        char * since,
+	/* Callbacks for memory management and error handling. */
+	void *(*_mmalloc) (size_t s),
+        void (*_mfree) (void *adr),
+        void (*_mcallback) (dbms_cause_t cause, int cnt),
+        void (*_merror) (char *err, int erx)
+        ) {
+	struct tm thedateval_tm;
+	char thedateval[RDFSTORE_XSD_DATETIME_FORMAT_SIZE];
+	DBT key, data;
+	int err=0;
+	FLATDB  * model;
+	int port=0;
+	int remote=0;
+	char host[ MAXPATHLEN ];
+
+	strcpy(host, "");
+
+	if( name == NULL ) {
+		return 0;
+		};
+
+	memset(&key, 0, sizeof(key));
+	memset(&data, 0, sizeof(data));
+
+	if( ! rdfstore_xsd_deserialize_dateTime( since, &thedateval_tm ) ) { /* get/normalize passed xsd:dateTime */
+		return -1;
+		};
+
+	rdfstore_xsd_serialize_dateTime( thedateval_tm, thedateval );
+
+	/* get the DB name */
+	if (!strncmp(name,"rdfstore://",(size_t)11)) {
+                char url_port[255];
+                char * p;
+                char * p1;
+                name+=11;
+                p = strstr(name,":");
+                p1 = strstr(name,"/");
+                if(p!=NULL) {
+                        /* get the host out */
+                        strncpy(host,name,p-name);
+                        host[p-name] = '\0';        
+                        if (strlen(host)<=0) { 
+				return -1;
+                                };
+                        /* get the port out */ 
+                        strncpy(url_port,p+1,p1-(p+1));
+                        port = atoi(url_port);
+                        if (port<=1) {
+				return -1;
+                                };
+                        name=p1+1;
+                        remote = 1;
+                } else if(p1!=NULL) {
+                        /* get the host out */
+                        strncpy(host,name,p1-name);
+                        host[p1-name] = '\0';
+                        if (strlen(host)<=0) {
+                                remote = 0;
+                        } else {
+                                name=p1+1;
+                                remote = 1;
+                                };
+                        };
+	} else if (	(!strncmp(name,"file://",(size_t)7)) ||
+			(!strncmp(name,"http://",(size_t)7)) ) {
+		return -1;
+		};
+
+	/* just one quick / simple connection to model */
+	err = rdfstore_flat_store_open(remote,
+		      			1, /* read only */
+				        &model,
+				        name, (((name == NULL) || (strlen(name) == 0)) ? NULL : "/model"), 
+					(unsigned int)(32 * 1024), host, port,
+				     	_mmalloc, _mfree, _mcallback, _merror,
+					0);
+	if (err != 0) {
+		return -1;
+		};
+
+	key.data = RDFSTORE_LASTMODIFIED_KEY;
+        key.size = sizeof(RDFSTORE_LASTMODIFIED_KEY);
+
+	err = rdfstore_flat_store_fetch(model, key, &data);
+	if (err != 0) {
+		if (err != FLAT_STORE_E_NOTFOUND) {
+			perror("rdfstore_if_modified_since");
+			fprintf(stderr,"Could not find %s key for store '%s': %s\n", RDFSTORE_LASTMODIFIED_KEY, (name != NULL) ? name : "(in-memory)", rdfstore_flat_store_get_error(model));
+			rdfstore_flat_store_close(model);
+
+			return -1;
+		} else {
+			rdfstore_flat_store_close(model);
+
+			return 1;
+			};
+	} else {
+		if( strcmp( thedateval, data.data ) < 0 ) {
+#ifdef RDFSTORE_DEBUG
+			printf(" %s < %s \n", thedateval, (char*)(data.data) );
+#endif
+			rdfstore_flat_store_close(model);
+
+			return 0;
+		} else {
+#ifdef RDFSTORE_DEBUG
+			printf(" %s >= %s \n", thedateval, (char*)(data.data) );
+#endif
+			rdfstore_flat_store_close(model);
+
+			return 1;
+			};
+		};
+	};
+
 int 
 rdfstore_insert(
 		rdfstore * me,
@@ -815,36 +1058,46 @@ rdfstore_insert(
 	unsigned char   nodebuf[ 32 * 1024 ];
 	unsigned char  *word;
 	unsigned char   mask = 0;
-	unsigned char  *utf8_casefolded_buff;	/* dyn alloc for saving
-						 * memory */
+	unsigned char  *utf8_casefolded_buff;
 	unsigned int    utf8_size = 0;
 	char           *sep = RDFSTORE_WORD_SPLITS;
 	int             err, l, i = 0;
 	rdf_store_digest_t  hc = 0;
 
+	int islval=0;
+	int isdval=0;
+	long thelval;
+	double thedval;
+	struct tm thedateval_tm;
+	struct tm* ptm;
+	time_t now;
+	char thedateval[RDFSTORE_XSD_DATETIME_FORMAT_SIZE];
+
+	assert(sizeof(unsigned char)==1);
+
 #ifdef RDFSTORE_CONNECTIONS
 	/* buffers for connections matrixes */
-	static unsigned char s_connections[MAXRECORDS_BYTES_SIZE];
-	static unsigned char p_connections[MAXRECORDS_BYTES_SIZE];
-	static unsigned char o_connections[MAXRECORDS_BYTES_SIZE];
+	static unsigned char s_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+	static unsigned char p_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+	static unsigned char o_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 	unsigned int    s_outsize = 0;
 	unsigned int    p_outsize = 0;
 	unsigned int    o_outsize = 0;
 
-	bzero(s_connections,sizeof(MAXRECORDS_BYTES_SIZE));
-	bzero(p_connections,sizeof(MAXRECORDS_BYTES_SIZE));
-	bzero(o_connections,sizeof(MAXRECORDS_BYTES_SIZE));
+	bzero(s_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+	bzero(p_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+	bzero(o_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
 
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 	rdfstore_iterator *reindex;
 	unsigned int    pos = 0;
 	RDF_Statement * neighbour;
 	unsigned int    outsize_reindex = 0;
-	static unsigned char reindex_encode[MAXRECORDS_BYTES_SIZE];
-	static unsigned char reindex_decode[MAXRECORDS_BYTES_SIZE];
+	static unsigned char reindex_encode[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+	static unsigned char reindex_decode[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 
-	bzero(reindex_encode,sizeof(MAXRECORDS_BYTES_SIZE));
-	bzero(reindex_decode,sizeof(MAXRECORDS_BYTES_SIZE));
+	bzero(reindex_encode,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+	bzero(reindex_decode,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
 #endif
 
 #endif
@@ -876,6 +1129,12 @@ rdfstore_insert(
 		rdfstore_flat_store_reset_debuginfo(me->languages);
 	if(me->datatypes)
 		rdfstore_flat_store_reset_debuginfo(me->datatypes);
+	if(me->xsd_integer)
+		rdfstore_flat_store_reset_debuginfo(me->xsd_integer);
+	if(me->xsd_double)
+		rdfstore_flat_store_reset_debuginfo(me->xsd_double);
+	if(me->xsd_date)
+		rdfstore_flat_store_reset_debuginfo(me->xsd_date);
 	if (context != NULL)
 		rdfstore_flat_store_reset_debuginfo(me->contexts);
 	if (me->freetext)
@@ -1036,15 +1295,15 @@ rdfstore_insert(
 
 #ifdef RDFSTORE_DEBUG
 	{
-		fprintf(stderr, "New statement identifier: %d > %d\n", (int)st_id, (int)MAXRECORDS);
+		fprintf(stderr, "New statement identifier: %d > %d\n", (int)st_id, (int)RDFSTORE_MAXRECORDS);
 	};
 #endif
 
-	if (st_id > MAXRECORDS) {
+	if (st_id > RDFSTORE_MAXRECORDS) {
 		if ((rdfstore_flat_store_dec(me->model, key, &data)) == 0)
 			RDFSTORE_FREE(data.data);
 		perror("rdfstore_insert");
-		fprintf(stderr,"MAXRECORDS(%d) reached (st_id=%d) - can not insert more statements in store '%s': %s\n", MAXRECORDS, st_id, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->model));
+		fprintf(stderr,"RDFSTORE_MAXRECORDS(%d) reached (st_id=%d) - can not insert more statements in store '%s': %s\n", RDFSTORE_MAXRECORDS, st_id, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->model));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 		rdfstore_iterator_close(reindex);
 #endif
@@ -1250,12 +1509,12 @@ rdfstore_insert(
 		return -1;
 		};
 
-	/* free-text search on literals stuff */
+	/* index special literal stuff */
 	if (statement->object->type == 1) {
-		if ((me->freetext) &&
-		    (statement->object->value.literal.string != NULL)) {
-			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(statement->object->value.literal.string_len * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));	/* what about the ending
-																								 * '\0' here ?? */
+		if (	(me->freetext) &&
+		    	(statement->object->value.literal.string != NULL) &&
+			(statement->object->value.literal.string_len > 0) ) {
+			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(statement->object->value.literal.string_len * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));	/* what about the ending '\0' here ?? */
 			if (utf8_casefolded_buff == NULL) {
 				perror("rdfstore_insert");
 				fprintf(stderr,"Cannot compute case-folded string out of input literal for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
@@ -1274,9 +1533,10 @@ rdfstore_insert(
 				return -1;
 				};
 
-			for (word = strtok(utf8_casefolded_buff, sep);
-			     word;
-			     word = strtok(NULL, sep)) {
+			/* we do not even try to avoid duplicates for the moment */
+			for (	word = strtok(utf8_casefolded_buff, sep);
+			     	word;
+			     	word = strtok(NULL, sep) ) {
 				int jj=0;
 				int kk=0;
 
@@ -1348,13 +1608,18 @@ rdfstore_insert(
 				*/
 #if RDFSTORE_WORD_STEMMING > 0
 
-				if(	(! isalpha((int)word[0]) ) || /* need of course to be UTF-8 compliant in the future */
+				if(	( rdfstore_xsd_deserialize_integer( word, &thelval ) ) ||
+					( rdfstore_xsd_deserialize_double( word, &thedval )  ) ||
+					( rdfstore_xsd_deserialize_dateTime(	word,
+										&thedateval_tm ) ) ||
+					( rdfstore_xsd_deserialize_date(	word,
+										&thedateval_tm ) ) || /* dates are skipped, even if rdf:datatype is not set */
 					(strlen(word)<=1) )
 					continue;
 
 				/* for efficency we should check if the given partial stem has been already indexed for the same word!!! */
 				jj=1;
-				while (	( jj <= strlen(word) ) &&
+				while (	( jj < strlen(word) ) &&
 					( kk < RDFSTORE_WORD_STEMMING ) ) {
 					char stem[MIN((RDFSTORE_WORD_STEMMING*RDFSTORE_UTF8_MAXLEN_FOLD),strlen(word))+1];
 
@@ -1362,7 +1627,7 @@ rdfstore_insert(
 
 					/* look for next utf8 char to add to stemming string */
 					utf8_size=0;
-					while (	( jj <= strlen(word) ) &&
+					while (	( jj < strlen(word) ) &&
                                         	(!( rdfstore_utf8_is_utf8( word+jj, &utf8_size ) )) ) {
 						jj++;
 						};
@@ -1442,73 +1707,71 @@ rdfstore_insert(
 				};
 			RDFSTORE_FREE(utf8_casefolded_buff);
 			};
-		};
 
-	/* languages table */
-	if (	(statement->object->type == 1) &&
-		(statement->object->value.literal.lang != NULL) &&
-		(strlen(statement->object->value.literal.lang) > 0) ) {
-		utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(strlen(statement->object->value.literal.lang) * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));
-		if (utf8_casefolded_buff == NULL) {
-			perror("rdfstore_insert");
-			fprintf(stderr,"Cannot compute case-folded string for literal language code '%s' for store '%s'\n", statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)");
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
-#endif
-			return -1;
-			};
-		if (rdfstore_utf8_string_to_utf8_foldedcase(strlen(statement->object->value.literal.lang), statement->object->value.literal.lang, &utf8_size, utf8_casefolded_buff)) {
-			perror("rdfstore_insert");
-			fprintf(stderr,"Cannot compute case-folded string for literal language code '%s' for store '%s'\n", statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)");
-			RDFSTORE_FREE(utf8_casefolded_buff);
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
-#endif
-			return -1;
-			};
-
-		key.data = utf8_casefolded_buff;
-		key.size = utf8_size;
-
-		err = rdfstore_flat_store_fetch(me->languages, key, &data);
-		if (err != 0) {
-			if (err != FLAT_STORE_E_NOTFOUND) {
-				RDFSTORE_FREE(utf8_casefolded_buff);
+		/* languages table */
+		if (	(statement->object->value.literal.lang != NULL) &&
+			(strlen(statement->object->value.literal.lang) > 0) ) {
+			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(strlen(statement->object->value.literal.lang) * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));
+			if (utf8_casefolded_buff == NULL) {
 				perror("rdfstore_insert");
-				fprintf(stderr,"Could not fetch language '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+				fprintf(stderr,"Cannot compute case-folded string for literal language code '%s' for store '%s'\n", statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)");
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 				rdfstore_iterator_close(reindex);
 #endif
 				return -1;
-			} else {
-				outsize = 0;
 				};
-		} else {
-			me->func_decode(data.size, data.data, &outsize, me->bits_decode);
-			RDFSTORE_FREE(data.data);
-			};
-		rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
-
-		me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
-		if (outsize) {
-			data.data = me->bits_encode;
-			data.size = outsize;
-			err = rdfstore_flat_store_store(me->languages, key, data);
-			if (err == 0) {
-#ifdef RDFSTORE_DEBUG_COMPRESSION
-				fprintf(stderr,"Stored %d bytes for '%s' in languages for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+			if (rdfstore_utf8_string_to_utf8_foldedcase(strlen(statement->object->value.literal.lang), statement->object->value.literal.lang, &utf8_size, utf8_casefolded_buff)) {
+				perror("rdfstore_insert");
+				fprintf(stderr,"Cannot compute case-folded string for literal language code '%s' for store '%s'\n", statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)");
+				RDFSTORE_FREE(utf8_casefolded_buff);
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+				rdfstore_iterator_close(reindex);
 #endif
-			} else {
-				if (err != FLAT_STORE_E_KEYEXIST) {
+				return -1;
+				};
+
+			key.data = utf8_casefolded_buff;
+			key.size = utf8_size;
+
+			err = rdfstore_flat_store_fetch(me->languages, key, &data);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
 					RDFSTORE_FREE(utf8_casefolded_buff);
 					perror("rdfstore_insert");
-					fprintf(stderr,"Could not store '%d' bytes for language '%s' in languages for store '%s': %s\n", (int)data.size, statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+					fprintf(stderr,"Could not fetch language '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 					rdfstore_iterator_close(reindex);
 #endif
 					return -1;
+				} else {
+					outsize = 0;
 					};
+			} else {
+				me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+				RDFSTORE_FREE(data.data);
 				};
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
+
+			me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
+			if (outsize) {
+				data.data = me->bits_encode;
+				data.size = outsize;
+				err = rdfstore_flat_store_store(me->languages, key, data);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for '%s' in languages for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						RDFSTORE_FREE(utf8_casefolded_buff);
+						perror("rdfstore_insert");
+						fprintf(stderr,"Could not store '%d' bytes for language '%s' in languages for store '%s': %s\n", (int)data.size, statement->object->value.literal.lang, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
 
 #ifdef RDFSTORE_DEBUG
 				{
@@ -1525,55 +1788,54 @@ rdfstore_insert(
 				}
 #endif
 
-			};
-
-		RDFSTORE_FREE(utf8_casefolded_buff);
-		};
-
-	/* datatypes table */
-	if (	(statement->object->type == 1) &&
-		(statement->object->value.literal.dataType != NULL) &&
-		(strlen(statement->object->value.literal.dataType) > 0) ) {
-		key.data = statement->object->value.literal.dataType;
-		key.size = strlen(statement->object->value.literal.dataType);
-
-		err = rdfstore_flat_store_fetch(me->datatypes, key, &data);
-		if (err != 0) {
-			if (err != FLAT_STORE_E_NOTFOUND) {
-				perror("rdfstore_insert");
-				fprintf(stderr,"Could not fetch datatype '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-				rdfstore_iterator_close(reindex);
-#endif
-				return -1;
-			} else {
-				outsize = 0;
 				};
-		} else {
-			me->func_decode(data.size, data.data, &outsize, me->bits_decode);
-			RDFSTORE_FREE(data.data);
-			};
-		rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
 
-		me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
-		if (outsize) {
-			data.data = me->bits_encode;
-			data.size = outsize;
-			err = rdfstore_flat_store_store(me->datatypes, key, data);
-			if (err == 0) {
-#ifdef RDFSTORE_DEBUG_COMPRESSION
-				fprintf(stderr,"Stored %d bytes for '%s' in datatypes for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
-#endif
-			} else {
-				if (err != FLAT_STORE_E_KEYEXIST) {
+			RDFSTORE_FREE(utf8_casefolded_buff);
+			};
+
+		/* datatypes table */
+		if (	(statement->object->value.literal.dataType != NULL) &&
+			(strlen(statement->object->value.literal.dataType) > 0) ) {
+			key.data = statement->object->value.literal.dataType;
+			key.size = strlen(statement->object->value.literal.dataType);
+
+			err = rdfstore_flat_store_fetch(me->datatypes, key, &data);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
 					perror("rdfstore_insert");
-					fprintf(stderr,"Could not store '%d' bytes for datatype '%s' in datatypes for store '%s': %s\n", (int)data.size, statement->object->value.literal.dataType, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
+					fprintf(stderr,"Could not fetch datatype '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 					rdfstore_iterator_close(reindex);
 #endif
 					return -1;
+				} else {
+					outsize = 0;
 					};
+			} else {
+				me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+				RDFSTORE_FREE(data.data);
 				};
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
+
+			me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
+			if (outsize) {
+				data.data = me->bits_encode;
+				data.size = outsize;
+				err = rdfstore_flat_store_store(me->datatypes, key, data);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for '%s' in datatypes for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_insert");
+						fprintf(stderr,"Could not store '%d' bytes for datatype '%s' in datatypes for store '%s': %s\n", (int)data.size, statement->object->value.literal.dataType, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
 
 #ifdef RDFSTORE_DEBUG
 				{
@@ -1590,9 +1852,216 @@ rdfstore_insert(
 				}
 #endif
 
+				};
+
+			/* date type indexing only if rdf:datatype is set accordingly to xsd:date or xsd:dateTime */
+			if(	(strcmp(statement->object->value.literal.dataType,RDFSTORE_MS_XSD_DATE)==0) ||
+				(strcmp(statement->object->value.literal.dataType,RDFSTORE_MS_XSD_DATETIME)==0) ) {
+				if (	( rdfstore_xsd_deserialize_dateTime(	statement->object->value.literal.string,
+										&thedateval_tm ) ) ||
+					( rdfstore_xsd_deserialize_date(	statement->object->value.literal.string,
+										&thedateval_tm ) ) ) {
+
+					rdfstore_xsd_serialize_dateTime( thedateval_tm, thedateval ); /* we index xsd:dataTime version anyway */
+
+					key.data = thedateval;
+					key.size = strlen(thedateval)+1;
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "INDEX DATE '%s' for LITERAL '%s' \n",thedateval, statement->object->value.literal.string);
+#endif
+
+					err = rdfstore_flat_store_fetch(me->xsd_date, key, &data);
+					if (err != 0) {
+						if (err != FLAT_STORE_E_NOTFOUND) {
+							perror("rdfstore_insert");
+							fprintf(stderr,"Could not fetch from date table value '%s' for store '%s': %s\n", statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_date));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+							rdfstore_iterator_close(reindex);
+#endif
+							return -1;
+						} else {
+							outsize = 0;
+							};
+					} else {
+						me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+						RDFSTORE_FREE(data.data);
+						};
+					rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
+
+					me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
+					if (outsize) {
+						data.data = me->bits_encode;
+						data.size = outsize;
+						err = rdfstore_flat_store_store(me->xsd_date, key, data);
+						if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+							fprintf(stderr,"Stored %d bytes for date '%s' in literal '%s' in integer table for store '%s'\n", outsize, thedateval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+						} else {
+							if (err != FLAT_STORE_E_KEYEXIST) {
+								perror("rdfstore_insert");
+								fprintf(stderr,"Could not store '%d' bytes for date '%s' in literal '%s' in date table for store '%s': %s\n", (int)data.size, thedateval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_date));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+								rdfstore_iterator_close(reindex);
+#endif
+								return -1;
+								};
+							};
+
+#ifdef RDFSTORE_DEBUG
+						{
+						int             i;
+						if ((rdfstore_flat_store_fetch(me->xsd_date, key, &data)) == 0) {
+							me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+							RDFSTORE_FREE(data.data);
+							};
+						printf("ADDED (%d) date '%s' of literal '%s' -->'", st_id, thedateval, statement->object->value.literal.string);
+						for (i = 0; i < outsize; i++) {
+							printf("%02X", me->bits_decode[i]);
+							};
+						printf("'\n");
+						}
+#endif
+
+						};
+					};
+				}; /* end of date indexing */
 			};
 
-		};
+		/* for xsd:integer alike literals use special b-tree sorted index if strtol() works.... */
+		if( ( islval = rdfstore_xsd_deserialize_integer( statement->object->value.literal.string, &thelval ) ) != 0 ) {
+			key.data = (long*) &thelval; /* should pack int perhaps... */
+			key.size = sizeof(long);
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "INDEX INTEGER '%ld' for LITERAL '%s' \n",(long)thelval, statement->object->value.literal.string);
+#endif
+
+			err = rdfstore_flat_store_fetch(me->xsd_integer, key, &data);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
+					perror("rdfstore_insert");
+					fprintf(stderr,"Could not fetch from integer table value '%s' for store '%s': %s\n", statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_integer));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+					rdfstore_iterator_close(reindex);
+#endif
+					return -1;
+				} else {
+					outsize = 0;
+					};
+			} else {
+				me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+				RDFSTORE_FREE(data.data);
+				};
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
+
+			me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
+			if (outsize) {
+				data.data = me->bits_encode;
+				data.size = outsize;
+				err = rdfstore_flat_store_store(me->xsd_integer, key, data);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for integer '%ld' in literal '%s' in integer table for store '%s'\n", outsize, (long)thelval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_insert");
+						fprintf(stderr,"Could not store '%d' bytes for integer '%ld' in literal '%s' in integer table for store '%s': %s\n", (int)data.size, (long)thelval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_integer));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
+
+#ifdef RDFSTORE_DEBUG
+				{
+				int             i;
+				if ((rdfstore_flat_store_fetch(me->xsd_integer, key, &data)) == 0) {
+					me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+					RDFSTORE_FREE(data.data);
+				};
+				printf("ADDED (%d) integer '%ld' of literal '%s' -->'", st_id, (long)thelval, statement->object->value.literal.string);
+				for (i = 0; i < outsize; i++) {
+					printf("%02X", me->bits_decode[i]);
+					};
+				printf("'\n");
+				}
+#endif
+
+				};
+
+			};
+
+		/* for xsd:double or xsd:float alike literals use special b-tree sorted index if strtod() works.... */
+		if(	( islval == 0 ) && /* do not index xsd:integer(s) twice also as xsd:double */
+			( ( isdval = rdfstore_xsd_deserialize_double( statement->object->value.literal.string, &thedval ) ) != 0 ) ) {
+			key.data = (double*) &thedval; /* should pack int perhaps... */
+			key.size = sizeof(double);
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "INDEX DOUBLE '%f' for LITERAL '%s' \n",thedval, statement->object->value.literal.string);
+#endif
+
+			err = rdfstore_flat_store_fetch(me->xsd_double, key, &data);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
+					perror("rdfstore_insert");
+					fprintf(stderr,"Could not fetch from double table value '%s' for store '%s': %s\n", statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_double));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+					rdfstore_iterator_close(reindex);
+#endif
+					return -1;
+				} else {
+					outsize = 0;
+					};
+			} else {
+				me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+				RDFSTORE_FREE(data.data);
+				};
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 1, sizeof(me->bits_decode));
+
+			me->func_encode(outsize, me->bits_decode, &outsize, me->bits_encode);
+			if (outsize) {
+				data.data = me->bits_encode;
+				data.size = outsize;
+				err = rdfstore_flat_store_store(me->xsd_double, key, data);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for double '%f' in literal '%s' in double table for store '%s'\n", outsize, thedval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_insert");
+						fprintf(stderr,"Could not store '%d' bytes for double '%f' in literal '%s' in double table for store '%s': %s\n", (int)data.size, thedval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_double));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
+
+#ifdef RDFSTORE_DEBUG
+				{
+				int             i;
+				if ((rdfstore_flat_store_fetch(me->xsd_double, key, &data)) == 0) {
+					me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+					RDFSTORE_FREE(data.data);
+				};
+				printf("ADDED (%d) double '%f' of literal '%s' -->'", st_id, thedval, statement->object->value.literal.string);
+				for (i = 0; i < outsize; i++) {
+					printf("%02X", me->bits_decode[i]);
+					};
+				printf("'\n");
+				}
+#endif
+
+				};
+
+			};
+		}; /* end index special literal stuff */
 
 	/*
 	 * gettimeofday(&tnow,NULL); ttime = ( tnow.tv_sec - tstart.tv_sec ) *
@@ -3710,7 +4179,34 @@ MX;
 		rdfstore_iterator_close(reindex);
 #endif
 		return -1;
-	};
+	} else {
+		/* touch DB last modified date */
+        	bzero(&thedateval_tm, sizeof( struct tm ) );
+
+        	time(&now);
+
+        	ptm = gmtime(&now);
+        	memcpy(&thedateval_tm, ptm, sizeof(struct tm));
+
+        	rdfstore_xsd_serialize_dateTime( thedateval_tm, thedateval );
+
+        	key.data = RDFSTORE_LASTMODIFIED_KEY;
+        	key.size = sizeof(RDFSTORE_LASTMODIFIED_KEY);
+
+		data.data = thedateval;
+		data.size = strlen(thedateval) + 1;
+
+		err = rdfstore_flat_store_store(me->model, key, data);
+		if (	(err != 0) &&
+			(err != FLAT_STORE_E_KEYEXIST) ) {
+			perror("rdfstore_insert");
+			fprintf(stderr,"Could not store last modified date in model for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->model));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+			rdfstore_iterator_close(reindex);
+#endif
+			return -1;
+			};
+		};
 
 	if ((me->sync) &&
 	    (!(me->flag))) {
@@ -3734,6 +4230,12 @@ MX;
                         rdfstore_flat_store_sync(me->languages);
                 if (me->datatypes)
                         rdfstore_flat_store_sync(me->datatypes);
+                if (me->xsd_integer)
+                        rdfstore_flat_store_sync(me->xsd_integer);
+                if (me->xsd_double)
+                        rdfstore_flat_store_sync(me->xsd_double);
+                if (me->xsd_date)
+                        rdfstore_flat_store_sync(me->xsd_date);
                 if (me->freetext)
                         rdfstore_flat_store_sync(me->windex);
 		};
@@ -3753,7 +4255,7 @@ MX;
 #endif
 
 	return 0;
-};
+	};
 
 int 
 rdfstore_remove(
@@ -3768,35 +4270,43 @@ rdfstore_remove(
 	DBT             key, data;
 	unsigned char   outbuf[256];
 	unsigned char  *word;
-	unsigned char  *utf8_casefolded_buff;	/* dyn alloc for saving
-						 * memory */
+	unsigned char  *utf8_casefolded_buff;
 	unsigned int    utf8_size = 0, pos = 0;
 	char           *sep = RDFSTORE_WORD_SPLITS;
 	int             err;
 	rdf_store_digest_t hc = 0;
 
+	int islval=0;
+	int isdval=0;
+	long thelval;
+	double thedval;
+	struct tm thedateval_tm;
+	struct tm* ptm;
+	time_t now;
+	char thedateval[RDFSTORE_XSD_DATETIME_FORMAT_SIZE];
+
 #ifdef RDFSTORE_CONNECTIONS
         /* buffers for connections matrixes */
-        static unsigned char s_connections[MAXRECORDS_BYTES_SIZE];
-        static unsigned char p_connections[MAXRECORDS_BYTES_SIZE];
-        static unsigned char o_connections[MAXRECORDS_BYTES_SIZE];
+        static unsigned char s_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+        static unsigned char p_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+        static unsigned char o_connections[RDFSTORE_MAXRECORDS_BYTES_SIZE];
         unsigned int    s_outsize = 0;
         unsigned int    p_outsize = 0;
         unsigned int    o_outsize = 0;
 
-	bzero(s_connections,sizeof(MAXRECORDS_BYTES_SIZE));
-        bzero(p_connections,sizeof(MAXRECORDS_BYTES_SIZE));
-        bzero(o_connections,sizeof(MAXRECORDS_BYTES_SIZE));
+	bzero(s_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+        bzero(p_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+        bzero(o_connections,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
 
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
         rdfstore_iterator *reindex;
         RDF_Statement * neighbour;
         unsigned int    outsize_reindex = 0;
-        static unsigned char reindex_encode[MAXRECORDS_BYTES_SIZE];
-        static unsigned char reindex_decode[MAXRECORDS_BYTES_SIZE];
+        static unsigned char reindex_encode[RDFSTORE_MAXRECORDS_BYTES_SIZE];
+        static unsigned char reindex_decode[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 
-	bzero(reindex_encode,sizeof(MAXRECORDS_BYTES_SIZE));
-	bzero(reindex_decode,sizeof(MAXRECORDS_BYTES_SIZE));
+	bzero(reindex_encode,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
+	bzero(reindex_decode,sizeof(RDFSTORE_MAXRECORDS_BYTES_SIZE));
 #endif
 
 #endif
@@ -3927,7 +4437,19 @@ rdfstore_remove(
 	packInt(st_id, outbuf);
 	key.data = outbuf;
 	key.size = sizeof(int);
-	rdfstore_flat_store_delete(me->nodes, key);	/* so easy now :-) */
+	err = rdfstore_flat_store_delete(me->nodes, key);
+	if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                rdfstore_iterator_close(reindex);
+#endif
+                if (err != FLAT_STORE_E_NOTFOUND) {
+                	perror("rdfstore_remove");
+                	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->nodes));
+                	return -1;
+		} else {
+                	return 1;
+			};
+                };
 
 	/* remove adjacency matrixes stuff */
 
@@ -4209,7 +4731,19 @@ rdfstore_remove(
         	s_outsize = outsize;
 #endif
 	} else {
-		rdfstore_flat_store_delete(me->subjects, key);	/* clean up */
+		err = rdfstore_flat_store_delete(me->subjects, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                	rdfstore_iterator_close(reindex);
+#endif
+			if (err != FLAT_STORE_E_NOTFOUND) {
+                		perror("rdfstore_remove");
+                		fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->subjects));
+                		return -1;
+			} else {
+				return 1;
+				};
+                	};
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) subjects for S\n", st_id);
 #endif
@@ -4436,7 +4970,19 @@ MX;
         	bcopy(me->bits_encode, p_connections, p_outsize);   /* slow? */
 #endif
 	} else { 
-		rdfstore_flat_store_delete(me->predicates, key);
+		err = rdfstore_flat_store_delete(me->predicates, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        rdfstore_iterator_close(reindex);
+#endif
+                        if (err != FLAT_STORE_E_NOTFOUND) {
+                        	perror("rdfstore_remove");
+                        	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->predicates));
+                        	return -1;
+			} else {
+				return 1;
+				};
+                        };
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) predicates for P\n", st_id);
 #endif
@@ -4662,7 +5208,19 @@ MX;
         	bcopy(me->bits_encode, o_connections, o_outsize);   /* slow? */
 #endif
 	} else {
-		rdfstore_flat_store_delete(me->objects, key);
+		err = rdfstore_flat_store_delete(me->objects, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        rdfstore_iterator_close(reindex);
+#endif
+                        if (err != FLAT_STORE_E_NOTFOUND) {
+				perror("rdfstore_remove");
+                        	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->objects));
+                        	return -1;
+			} else {
+				return 1;
+				};
+                        };
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) objects for O\n", st_id);
 #endif
@@ -5744,7 +6302,19 @@ MX;
 
 			};
 	} else {
-		rdfstore_flat_store_delete(me->s_connections, key);
+		err = rdfstore_flat_store_delete(me->s_connections, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        rdfstore_iterator_close(reindex);
+#endif
+                        if (err != FLAT_STORE_E_NOTFOUND) {
+				perror("rdfstore_remove");
+                        	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->s_connections));
+                        	return -1;
+			} else {
+				return 1;
+				};
+                        };
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) s_connections for S '%s'\n", st_id,statement->subject->value.resource.identifier);
 #endif
@@ -5817,7 +6387,19 @@ MX;
 
 			};
 	} else {
-		rdfstore_flat_store_delete(me->p_connections, key);
+		err = rdfstore_flat_store_delete(me->p_connections, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        rdfstore_iterator_close(reindex);
+#endif
+                        if (err != FLAT_STORE_E_NOTFOUND) {
+				perror("rdfstore_remove");
+                        	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->p_connections));
+                        	return -1;
+			} else {
+				return 1;
+				};
+                        };
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) p_connections for P '%s'\n", st_id,statement->predicate->value.resource.identifier);
 #endif
@@ -5886,7 +6468,19 @@ MX;
 
 			};
 	} else {
-		rdfstore_flat_store_delete(me->o_connections, key);
+		err = rdfstore_flat_store_delete(me->o_connections, key);
+		if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        rdfstore_iterator_close(reindex);
+#endif
+                        if (err != FLAT_STORE_E_NOTFOUND) {
+				perror("rdfstore_remove");
+                        	fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->o_connections));
+                        	return -1;
+			} else {
+				return 1;
+				};
+                        };
 #ifdef RDFSTORE_DEBUG
 		printf("DELETED (%d) o_connections for O '%s'\n", st_id, (statement->object->type != 1) ? statement->object->value.resource.identifier : statement->object->value.literal.string);
 #endif
@@ -5955,169 +6549,72 @@ MX;
 				}
 #endif
 		} else {
-			rdfstore_flat_store_delete(me->contexts, key);
+			err = rdfstore_flat_store_delete(me->contexts, key);
+			if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        	rdfstore_iterator_close(reindex);
+#endif
+				if (err != FLAT_STORE_E_NOTFOUND) {
+                        		perror("rdfstore_remove");
+                        		fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->contexts));
+                        		return -1;
+				} else {
+					return 1;
+					};
+                        	};
 #ifdef RDFSTORE_DEBUG
 			printf("DELETED (%d) contexts for C\n", st_id);
 #endif
 		};
 	};
 
-	/* remove free-text search stuff for literals */
-	if ((statement->object->type == 1) &&
-	    (me->freetext) &&
-	    (statement->object->value.literal.string != NULL) &&
-	    (statement->object->value.literal.string_len > 0)) {
-		utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(statement->object->value.literal.string_len * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));	/* what about the ending
-																							 * '\0' here ?? */
-		if (utf8_casefolded_buff == NULL) {
-			perror("rdfstore_remove");
-			fprintf(stderr,"Cannot compute case-folded string out of input literal for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
+	/* remove special literal stuff */
+	if (statement->object->type == 1) {
+		if (	(me->freetext) &&
+		    	(statement->object->value.literal.string != NULL) &&
+			(statement->object->value.literal.string_len > 0) ) {
+			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(statement->object->value.literal.string_len * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));	/* what about the ending '\0' here ?? */
+			if (utf8_casefolded_buff == NULL) {
+				perror("rdfstore_remove");
+				fprintf(stderr,"Cannot compute case-folded string out of input literal for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
+				rdfstore_iterator_close(reindex);
 #endif
-			return -1;
-		};
-		if (rdfstore_utf8_string_to_utf8_foldedcase(statement->object->value.literal.string_len, statement->object->value.literal.string, &utf8_size, utf8_casefolded_buff)) {
-			perror("rdfstore_remove");
-			fprintf(stderr,"Cannot compute case-folded string out of input literal for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
-			RDFSTORE_FREE(utf8_casefolded_buff);
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
-#endif
-			return -1;
-		};
-		for (word = strtok(utf8_casefolded_buff, sep);
-		     word;
-		     word = strtok(NULL, sep)) {
-			int jj=0;
-			int kk=0;
-
-			key.data = word;
-			key.size = strlen(word);
-			err = rdfstore_flat_store_fetch_compressed(me->windex, me->func_decode, key, &outsize, me->bits_decode);
-			if (err != 0) {
-				if (err != FLAT_STORE_E_NOTFOUND) {
-					RDFSTORE_FREE(utf8_casefolded_buff);
-					perror("rdfstore_remove");
-					fprintf(stderr,"Could not fetch windex of word '%s' for store '%s': %s\n", word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-					rdfstore_iterator_close(reindex);
-#endif
-					return -1;
-				} else {
-					outsize = 0;
+				return -1;
 				};
-			};
-
-			/*
-			NOTE: perhaps the code below should be substituted as in the above other single-bit tables with
-
-			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
-
-                	outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
-			*/
-
-			/*
-			 * match stuff for literal words - we have one bit
-			 * only for free-text then we use
-			 * rdfstore_bits_getfirstsetafter()
-			 */
-			pos = 0;
-			if ((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)	/* matched once */
-				pos++;	/* hop to the next record */
-			if ((pos < outsize * 8) &&
-			    ((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)) {	/* matched more the one
-															 * record */
-#ifdef RDFSTORE_DEBUG
-				fprintf(stderr,"object literal word '%s' matched TWICE at pos=%d\n", word, pos);
-#endif
-				/* reset the right bit to zero */
-				rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
-				if (outsize) {
-					err = rdfstore_flat_store_store_compressed(me->windex, me->func_encode,key, outsize, me->bits_decode,me->bits_encode);
-					if (err == 0) {
-#ifdef RDFSTORE_DEBUG_COMPRESSION
-						fprintf(stderr,"Stored %d bytes for '%s' in windex for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
-#endif
-					} else {
-						if (err != FLAT_STORE_E_KEYEXIST) {
-							RDFSTORE_FREE(utf8_casefolded_buff);
-							perror("rdfstore_remove");
-							fprintf(stderr,"Could not store '%d' bytes for word '%s' in windex for store '%s': %s\n", (int)data.size, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+			if (rdfstore_utf8_string_to_utf8_foldedcase(statement->object->value.literal.string_len, statement->object->value.literal.string, &utf8_size, utf8_casefolded_buff)) {
+				perror("rdfstore_remove");
+				fprintf(stderr,"Cannot compute case-folded string out of input literal for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
+				RDFSTORE_FREE(utf8_casefolded_buff);
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-							rdfstore_iterator_close(reindex);
+				rdfstore_iterator_close(reindex);
 #endif
-							return -1;
-						};
-					};
-
-#ifdef RDFSTORE_DEBUG
-					{
-						int             i;
-						if ((rdfstore_flat_store_fetch(me->windex, key, &data)) == 0) {
-							me->func_decode(data.size, data.data, &outsize, me->bits_decode);
-							RDFSTORE_FREE(data.data);
-						};
-						printf("REMOVED (%d) windex for case-folded word '%s' -->'", st_id, word);
-						for(i=0;i<8*outsize;i++) {
-							printf("Rec %d %c\n", i, (me->bits_decode[i>>3] & (1<<(i&7))) ? '1':'0');
-                                                        };
-						printf("'\n");
-					}
-#endif
-
+				return -1;
 				};
-			} else {
-#ifdef RDFSTORE_DEBUG
-				printf("DELETED (%d) windex for case-folded word '%s'\n", st_id, word);
-#endif
-				rdfstore_flat_store_delete(me->windex, key);
-			};
 
-#if RDFSTORE_WORD_STEMMING > 0
+			for (	word = strtok(utf8_casefolded_buff, sep);
+		     		word;
+		     		word = strtok(NULL, sep) ) {
+				int jj=0;
+				int kk=0;
 
-                        if(     (! isalpha((int)word[0]) ) || /* need of course to be UTF-8 compliant in the future */
-                                (strlen(word)<=1) ) 
-                                continue;
-
-                        /* for efficency we should check if the given partial stem has been already indexed for the same word!!! */
-                        jj=1;
-                        while ( ( jj <= strlen(word) ) &&
-                                ( kk < RDFSTORE_WORD_STEMMING ) ) {
-                                char stem[MIN((RDFSTORE_WORD_STEMMING*RDFSTORE_UTF8_MAXLEN_FOLD),strlen(word))+1];
-
-                                bzero(stem,MIN((RDFSTORE_WORD_STEMMING*RDFSTORE_UTF8_MAXLEN_FOLD),strlen(word))+1);
-
-                                /* look for next utf8 char to add to stemming string */
-                                utf8_size=0;
-                                while ( ( jj <= strlen(word) ) &&
-                                        (!( rdfstore_utf8_is_utf8( word+jj, &utf8_size ) )) ) {
-                                        jj++;
-                                        };
-
-                                if (jj>strlen(word)) {
-                                        strncpy(stem, word, jj-1);
-                                } else {
-                                        strncpy(stem, word, jj);
-                                        };
-
-                                key.data = stem;
-                                key.size = strlen(stem);
-
+				key.data = word;
+				key.size = strlen(word);
 				err = rdfstore_flat_store_fetch_compressed(me->windex, me->func_decode, key, &outsize, me->bits_decode);
 				if (err != 0) {
 					if (err != FLAT_STORE_E_NOTFOUND) {
 						RDFSTORE_FREE(utf8_casefolded_buff);
 						perror("rdfstore_remove");
-						fprintf(stderr,"Could not fetch windex for stemming '%s' of word '%s' for store '%s': %s\n", stem, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+						fprintf(stderr,"Could not fetch windex of word '%s' for store '%s': %s\n", word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 						rdfstore_iterator_close(reindex);
 #endif
 						return -1;
 					} else {
 						outsize = 0;
+						};
 					};
-				};
+
 				/*
 				NOTE: perhaps the code below should be substituted as in the above other single-bit tables with
 
@@ -6127,33 +6624,32 @@ MX;
 				*/
 
 				/*
-			 	* match stuff for literal words - we have one bit
-			 	* only for free-text then we use
-			 	* rdfstore_bits_getfirstsetafter()
+			 	 * match stuff for literal words - we have one bit
+			 	 * only for free-text then we use
+			 	 * rdfstore_bits_getfirstsetafter()
 			 	*/
 				pos = 0;
 				if ((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)	/* matched once */
 					pos++;	/* hop to the next record */
 				if ((pos < outsize * 8) &&
 			    		((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)) {	/* matched more the one
-															 		* record */
+															 * record */
 #ifdef RDFSTORE_DEBUG
 					fprintf(stderr,"object literal word '%s' matched TWICE at pos=%d\n", word, pos);
 #endif
 					/* reset the right bit to zero */
 					rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
 					if (outsize) {
-						err = rdfstore_flat_store_store_compressed(me->windex, me->func_encode, 
-							key, outsize, me->bits_decode, me->bits_encode);
+						err = rdfstore_flat_store_store_compressed(me->windex, me->func_encode,key, outsize, me->bits_decode,me->bits_encode);
 						if (err == 0) {
 #ifdef RDFSTORE_DEBUG_COMPRESSION
-							fprintf(stderr,"Stored %d bytes for stemming '%s' in windex for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+							fprintf(stderr,"Stored %d bytes for '%s' in windex for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
 #endif
 						} else {
 							if (err != FLAT_STORE_E_KEYEXIST) {
 								RDFSTORE_FREE(utf8_casefolded_buff);
 								perror("rdfstore_remove");
-								fprintf(stderr,"Could not store '%d' bytes for stemming '%s' of word '%s' in windex for store '%s': %s\n", (int)data.size, stem, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+								fprintf(stderr,"Could not store '%d' bytes for word '%s' in windex for store '%s': %s\n", (int)data.size, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 								rdfstore_iterator_close(reindex);
 #endif
@@ -6168,93 +6664,235 @@ MX;
 							me->func_decode(data.size, data.data, &outsize, me->bits_decode);
 							RDFSTORE_FREE(data.data);
 						};
-						printf("REMOVED (%d) windex for case-folded stemming '%s' of word '%s' -->'", st_id, stem, word);
-						for (i = 0; i < outsize; i++) {
-							printf("%02X", me->bits_decode[i]);
-						};
+						printf("REMOVED (%d) windex for case-folded word '%s' -->'", st_id, word);
+						for(i=0;i<8*outsize;i++) {
+							printf("Rec %d %c\n", i, (me->bits_decode[i>>3] & (1<<(i&7))) ? '1':'0');
+                                                        };
 						printf("'\n");
 						}
 #endif
 
 						};
 				} else {
+					err = rdfstore_flat_store_delete(me->windex, key);
+					/* 	due that words and stems can be duplicated into the same literal we 
+						do not check if FLAT_STORE_E_NOTFOUND which means several delete operation might
+						be failing for the same literal - this could be avoided by checking duplicates
+						of words and stems into the input string */
+					if (err != 0) {
+						if (err != FLAT_STORE_E_NOTFOUND) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        				rdfstore_iterator_close(reindex);
+#endif
+							perror("rdfstore_remove");
+							fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+                        				return -1;
+							};
+                        			};
 #ifdef RDFSTORE_DEBUG
 					printf("DELETED (%d) windex for case-folded word '%s'\n", st_id, word);
 #endif
-					rdfstore_flat_store_delete(me->windex, key);
 					};
-				jj++;
-				kk++;
+
+#if RDFSTORE_WORD_STEMMING > 0
+
+				if(	( rdfstore_xsd_deserialize_integer( word, &thelval ) ) ||
+					( rdfstore_xsd_deserialize_double( word, &thedval )  ) ||
+					( rdfstore_xsd_deserialize_dateTime(	word,
+										&thedateval_tm ) ) ||
+					( rdfstore_xsd_deserialize_date(	word,
+										&thedateval_tm ) ) || /* dates are skipped, even if rdf:datatype is not set */
+					(strlen(word)<=1) )
+					continue;
+
+                        	/* for efficency we should check if the given partial stem has been already indexed for the same word!!! */
+                        	jj=1;
+                        	while ( ( jj < strlen(word) ) &&
+                                	( kk < RDFSTORE_WORD_STEMMING ) ) {
+                                	char stem[MIN((RDFSTORE_WORD_STEMMING*RDFSTORE_UTF8_MAXLEN_FOLD),strlen(word))+1];
+
+                                	bzero(stem,MIN((RDFSTORE_WORD_STEMMING*RDFSTORE_UTF8_MAXLEN_FOLD),strlen(word))+1);
+
+                                	/* look for next utf8 char to add to stemming string */
+                                	utf8_size=0;
+                                	while ( ( jj < strlen(word) ) &&
+                                        	(!( rdfstore_utf8_is_utf8( word+jj, &utf8_size ) )) ) {
+                                        	jj++;
+                                        	};
+
+                                	if (jj>strlen(word)) {
+                                        	strncpy(stem, word, jj-1);
+                                	} else {
+                                        	strncpy(stem, word, jj);
+                                        	};
+
+                                	key.data = stem;
+                                	key.size = strlen(stem);
+
+					err = rdfstore_flat_store_fetch_compressed(me->windex, me->func_decode, key, &outsize, me->bits_decode);
+					if (err != 0) {
+						if (err != FLAT_STORE_E_NOTFOUND) {
+							RDFSTORE_FREE(utf8_casefolded_buff);
+							perror("rdfstore_remove");
+							fprintf(stderr,"Could not fetch windex for stemming '%s' of word '%s' for store '%s': %s\n", stem, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+							rdfstore_iterator_close(reindex);
+#endif
+							return -1;
+						} else {
+							outsize = 0;
+							};
+						};
+					/*
+					NOTE: perhaps the code below should be substituted as in the above other single-bit tables with
+
+					rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                			outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+					*/
+
+					/*
+			 		 * match stuff for literal words - we have one bit
+			 		 * only for free-text then we use
+			 		 * rdfstore_bits_getfirstsetafter()
+			 		 */
+					pos = 0;
+					if ((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)	/* matched once */
+						pos++;	/* hop to the next record */
+					if ((pos < outsize * 8) &&
+			    			((pos = rdfstore_bits_getfirstsetafter(outsize, me->bits_decode, pos)) < outsize * 8)) {	/* matched more the one
+															 		* record */
+#ifdef RDFSTORE_DEBUG
+						fprintf(stderr,"object literal stem '%s' matched TWICE at pos=%d\n", word, pos);
+#endif
+						/* reset the right bit to zero */
+						rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+						if (outsize) {
+							err = rdfstore_flat_store_store_compressed(me->windex, me->func_encode, 
+								key, outsize, me->bits_decode, me->bits_encode);
+							if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+								fprintf(stderr,"Stored %d bytes for stemming '%s' in windex for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+							} else {
+								if (err != FLAT_STORE_E_KEYEXIST) {
+									RDFSTORE_FREE(utf8_casefolded_buff);
+									perror("rdfstore_remove");
+									fprintf(stderr,"Could not store '%d' bytes for stemming '%s' of word '%s' in windex for store '%s': %s\n", (int)data.size, stem, word, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+									rdfstore_iterator_close(reindex);
+#endif
+									return -1;
+									};
+								};
+
+#ifdef RDFSTORE_DEBUG
+							{
+							int             i;
+							if ((rdfstore_flat_store_fetch(me->windex, key, &data)) == 0) {
+								me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+								RDFSTORE_FREE(data.data);
+								};
+							printf("REMOVED (%d) windex for case-folded stemming '%s' of word '%s' -->'", st_id, stem, word);
+							for (i = 0; i < outsize; i++) {
+								printf("%02X", me->bits_decode[i]);
+								};
+							printf("'\n");
+							}
+#endif
+
+							};
+					} else {
+						err = rdfstore_flat_store_delete(me->windex, key);
+						if (err != 0) {
+							/* 	due that words and stems can be duplicated into the same literal we 
+								do not check if FLAT_STORE_E_NOTFOUND which means several delete operation might
+								be failing for the same literal - this could be avoided by checking duplicates
+								of words and stems into the input string */
+							if (err != FLAT_STORE_E_NOTFOUND) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        					rdfstore_iterator_close(reindex);
+#endif
+								perror("rdfstore_remove");
+								fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+                        					return -1;
+								};
+                        				};
+#ifdef RDFSTORE_DEBUG
+						printf("DELETED (%d) windex for case-folded stem '%s'\n", st_id, word);
+#endif
+						};
+					jj++;
+					kk++;
+					};
+#endif
+
 				};
-#endif
-
-		};
-		RDFSTORE_FREE(utf8_casefolded_buff);
-	};
-
-	/* languages table */
-	if (	(statement->object->type == 1) &&
-		(statement->object->value.literal.lang != NULL) &&
-		(strlen(statement->object->value.literal.lang) > 0) ) {
-		utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(strlen(statement->object->value.literal.lang) * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));
-		if (utf8_casefolded_buff == NULL) {
-			perror("rdfstore_remove");
-			fprintf(stderr,"Cannot compute case-folded string out of input literal language for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
-#endif
-			return -1;
-		};
-		if (rdfstore_utf8_string_to_utf8_foldedcase(strlen(statement->object->value.literal.lang), statement->object->value.literal.lang, &utf8_size, utf8_casefolded_buff)) {
-			perror("rdfstore_remove");
-			fprintf(stderr,"Cannot compute case-folded string out of input literal language for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
 			RDFSTORE_FREE(utf8_casefolded_buff);
-#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-			rdfstore_iterator_close(reindex);
-#endif
-			return -1;
-		};
+			};
 
-		key.data = utf8_casefolded_buff;
-		key.size = utf8_size;
-
-		err = rdfstore_flat_store_fetch_compressed(me->languages, me->func_decode, key, &outsize, me->bits_decode);
-		if (err != 0) {
-			if (err != FLAT_STORE_E_NOTFOUND) {
-				RDFSTORE_FREE(utf8_casefolded_buff);
+		/* languages table */
+		if (	(statement->object->value.literal.lang != NULL) &&
+			(strlen(statement->object->value.literal.lang) > 0) ) {
+			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(strlen(statement->object->value.literal.lang) * sizeof(unsigned char) * (RDFSTORE_UTF8_MAXLEN_FOLD + 1));
+			if (utf8_casefolded_buff == NULL) {
 				perror("rdfstore_remove");
-				fprintf(stderr,"Could not fetch language '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+				fprintf(stderr,"Cannot compute case-folded string out of input literal language for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 				rdfstore_iterator_close(reindex);
 #endif
 				return -1;
-			} else {
-				outsize = 0;
-			};
-		};
-
-		/* reset the right bit to zero */
-		rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
-
-                outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
-		if (outsize) {
-			err = rdfstore_flat_store_store_compressed(me->languages, me->func_encode, 
-							key, outsize, me->bits_decode, me->bits_encode);
-			if (err == 0) {
-#ifdef RDFSTORE_DEBUG_COMPRESSION
-				fprintf(stderr,"Stored %d bytes for language '%s' in languages for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+				};
+			if (rdfstore_utf8_string_to_utf8_foldedcase(strlen(statement->object->value.literal.lang), statement->object->value.literal.lang, &utf8_size, utf8_casefolded_buff)) {
+				perror("rdfstore_remove");
+				fprintf(stderr,"Cannot compute case-folded string out of input literal language for store '%s'\n", (me->name != NULL) ? me->name : "(in-memory)");
+				RDFSTORE_FREE(utf8_casefolded_buff);
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+				rdfstore_iterator_close(reindex);
 #endif
-			} else {
-				if (err != FLAT_STORE_E_KEYEXIST) {
+				return -1;
+				};
+
+			key.data = utf8_casefolded_buff;
+			key.size = utf8_size;
+
+			err = rdfstore_flat_store_fetch_compressed(me->languages, me->func_decode, key, &outsize, me->bits_decode);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
 					RDFSTORE_FREE(utf8_casefolded_buff);
 					perror("rdfstore_remove");
-					fprintf(stderr,"Could not store '%d' bytes for language '%s' of literal '%s' in languages for store '%s': %s\n", (int)data.size, statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+					fprintf(stderr,"Could not fetch language '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 					rdfstore_iterator_close(reindex);
 #endif
 					return -1;
+				} else {
+					outsize = 0;
 					};
 				};
+
+			/* reset the right bit to zero */
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                	outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+			if (outsize) {
+				err = rdfstore_flat_store_store_compressed(me->languages, me->func_encode, 
+							key, outsize, me->bits_decode, me->bits_encode);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for language '%s' in languages for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						RDFSTORE_FREE(utf8_casefolded_buff);
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not store '%d' bytes for language '%s' of literal '%s' in languages for store '%s': %s\n", (int)data.size, statement->object->value.literal.lang, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
 
 #ifdef RDFSTORE_DEBUG
 				{
@@ -6270,58 +6908,69 @@ MX;
 				printf("'\n");
 				}
 #endif
-		} else {
-#ifdef RDFSTORE_DEBUG
-			printf("DELETED (%d) languages for case-folded literal language '%s'\n", st_id, statement->object->value.literal.lang);
-#endif
-			rdfstore_flat_store_delete(me->languages, key);
-			};
-
-		RDFSTORE_FREE(utf8_casefolded_buff);
-		};
-
-	/* datatypes table */
-	if (	(statement->object->type == 1) &&
-		(statement->object->value.literal.dataType != NULL) &&
-		(strlen(statement->object->value.literal.dataType) > 0) ) {
-		key.data = statement->object->value.literal.dataType;
-		key.size = strlen(statement->object->value.literal.dataType);
-
-		err = rdfstore_flat_store_fetch_compressed(me->datatypes, me->func_decode, key, &outsize, me->bits_decode);
-		if (err != 0) {
-			if (err != FLAT_STORE_E_NOTFOUND) {
-				perror("rdfstore_remove");
-				fprintf(stderr,"Could not fetch datatype '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
+			} else {
+				err = rdfstore_flat_store_delete(me->languages, key);
+				if (err != 0) {
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
-				rdfstore_iterator_close(reindex);
+                        		rdfstore_iterator_close(reindex);
 #endif
-				return -1;
-			} else {
-				outsize = 0;
+					if (err != FLAT_STORE_E_NOTFOUND) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->languages));
+               					return -1;
+					} else {
+						return 1;
+						};
+               				};
+#ifdef RDFSTORE_DEBUG
+				printf("DELETED (%d) languages for case-folded literal language '%s'\n", st_id, statement->object->value.literal.lang);
+#endif
+				};
+
+			RDFSTORE_FREE(utf8_casefolded_buff);
 			};
-		};
 
-		/* reset the right bit to zero */
-		rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+		/* datatypes table */
+		if (	(statement->object->value.literal.dataType != NULL) &&
+			(strlen(statement->object->value.literal.dataType) > 0) ) {
+			key.data = statement->object->value.literal.dataType;
+			key.size = strlen(statement->object->value.literal.dataType);
 
-                outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
-		if (outsize) {
-			err = rdfstore_flat_store_store_compressed(me->datatypes, me->func_encode, 
-							key, outsize, me->bits_decode, me->bits_encode);
-			if (err == 0) {
-#ifdef RDFSTORE_DEBUG_COMPRESSION
-				fprintf(stderr,"Stored %d bytes for datatype '%s' in datatypes for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
-#endif
-			} else {
-				if (err != FLAT_STORE_E_KEYEXIST) {
+			err = rdfstore_flat_store_fetch_compressed(me->datatypes, me->func_decode, key, &outsize, me->bits_decode);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
 					perror("rdfstore_remove");
-					fprintf(stderr,"Could not store '%d' bytes for datatype '%s' of literal '%s' in datatypes for store '%s': %s\n", (int)data.size, statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->windex));
+					fprintf(stderr,"Could not fetch datatype '%s' of literal '%s' for store '%s': %s\n", statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
 #if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
 					rdfstore_iterator_close(reindex);
 #endif
 					return -1;
+				} else {
+					outsize = 0;
 					};
 				};
+
+			/* reset the right bit to zero */
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                	outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+			if (outsize) {
+				err = rdfstore_flat_store_store_compressed(me->datatypes, me->func_encode, 
+							key, outsize, me->bits_decode, me->bits_encode);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for datatype '%s' in datatypes for store '%s'\n", outsize, (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not store '%d' bytes for datatype '%s' of literal '%s' in datatypes for store '%s': %s\n", (int)data.size, statement->object->value.literal.dataType, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
 
 #ifdef RDFSTORE_DEBUG
 				{
@@ -6337,13 +6986,275 @@ MX;
 				printf("'\n");
 				}
 #endif
-		} else {
-#ifdef RDFSTORE_DEBUG
-			printf("DELETED (%d) datatypes literal datatype '%s'\n", st_id, statement->object->value.literal.dataType);
+			} else {
+				err = rdfstore_flat_store_delete(me->datatypes, key);
+				if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        		rdfstore_iterator_close(reindex);
 #endif
-			rdfstore_flat_store_delete(me->datatypes, key);
+					if (err != FLAT_STORE_E_NOTFOUND) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->datatypes));
+               					return -1;
+					} else {
+						return 1;
+						};
+               				};
+#ifdef RDFSTORE_DEBUG
+				printf("DELETED (%d) datatypes literal datatype '%s'\n", st_id, statement->object->value.literal.dataType);
+#endif
+				};
+
+			/* date type indexing only if rdf:datatype is set accordingly to xsd:date or xsd:dateTime */
+                        if(     (strcmp(statement->object->value.literal.dataType,RDFSTORE_MS_XSD_DATE)==0) ||
+                                (strcmp(statement->object->value.literal.dataType,RDFSTORE_MS_XSD_DATETIME)==0) ) {
+                                if(	( rdfstore_xsd_deserialize_dateTime(	statement->object->value.literal.string,
+										&thedateval_tm ) ) ||
+					( rdfstore_xsd_deserialize_date(	statement->object->value.literal.string,
+										&thedateval_tm ) ) ) {
+
+					rdfstore_xsd_serialize_dateTime( thedateval_tm, thedateval ); /* we index xsd:dataTime version anyway */
+
+                                        key.data = thedateval;
+                                        key.size = strlen(thedateval)+1;
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "REMOVE DATE '%s' for LITERAL '%s' \n", thedateval, statement->object->value.literal.string);
+#endif
+
+					err = rdfstore_flat_store_fetch_compressed(me->xsd_date, me->func_decode, key, &outsize, me->bits_decode);
+					if (err != 0) {
+						if (err != FLAT_STORE_E_NOTFOUND) {
+							perror("rdfstore_remove");
+							fprintf(stderr,"Could not fetch date '%ld' of literal '%s' for store '%s': %s\n", thedateval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_date));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+							rdfstore_iterator_close(reindex);
+#endif
+							return -1;
+						} else {
+							outsize = 0;
+							};
+						};
+
+					/* reset the right bit to zero */
+					rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                			outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+					if (outsize) {
+						err = rdfstore_flat_store_store_compressed(me->xsd_date, me->func_encode, 
+									key, outsize, me->bits_decode, me->bits_encode);
+						if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+							fprintf(stderr,"Stored %d bytes for date '%s' in date table for store '%s'\n", outsize, thedateval, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+						} else {
+							if (err != FLAT_STORE_E_KEYEXIST) {
+								perror("rdfstore_remove");
+								fprintf(stderr,"Could not store '%d' bytes for date '%s' of literal '%s' in date table for store '%s': %s\n", (int)data.size, thedateval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_date));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+								rdfstore_iterator_close(reindex);
+#endif
+								return -1;
+								};
+							};
+
+#ifdef RDFSTORE_DEBUG
+						{
+						int             i;
+						if ((rdfstore_flat_store_fetch(me->xsd_date, key, &data)) == 0) {
+							me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+							RDFSTORE_FREE(data.data);
+							};
+						printf("REMOVED (%d) date '%s' of literal '%s' -->'", st_id, thedateval, statement->object->value.literal.string);
+						for (i = 0; i < outsize; i++) {
+							printf("%02X", me->bits_decode[i]);
+							};
+						printf("'\n");
+						}
+#endif
+					} else {
+						err = rdfstore_flat_store_delete(me->xsd_date, key);
+						if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        				rdfstore_iterator_close(reindex);
+#endif
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_remove");
+								fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_date));
+               							return -1;
+							} else {
+								return 1;
+								};
+               						};
+#ifdef RDFSTORE_DEBUG
+						printf("DELETED (%d) date table date '%s'\n", st_id, thedateval);
+#endif
+						};
+					};
+				}; /* end of date indexing */
+
 			};
-		};
+
+		/* for xsd:integer alike literals use special b-tree sorted index if strtol() works.... */
+		if( ( islval = rdfstore_xsd_deserialize_integer( statement->object->value.literal.string, &thelval ) ) != 0 ) {
+			key.data = (long*) &thelval; /* should pack int perhaps... */
+			key.size = sizeof(long);
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "REMOVE INTEGER '%ld' for LITERAL '%s' \n",(long)thelval, statement->object->value.literal.string);
+#endif
+
+			err = rdfstore_flat_store_fetch_compressed(me->xsd_integer, me->func_decode, key, &outsize, me->bits_decode);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
+					perror("rdfstore_remove");
+					fprintf(stderr,"Could not fetch integer '%ld' of literal '%s' for store '%s': %s\n", (long)thelval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_integer));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+					rdfstore_iterator_close(reindex);
+#endif
+					return -1;
+				} else {
+					outsize = 0;
+					};
+				};
+
+			/* reset the right bit to zero */
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                	outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+			if (outsize) {
+				err = rdfstore_flat_store_store_compressed(me->xsd_integer, me->func_encode, 
+							key, outsize, me->bits_decode, me->bits_encode);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for integer '%ld' in integer table for store '%s'\n", outsize, (long)thelval, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not store '%d' bytes for integer '%ld' of literal '%s' in integer table for store '%s': %s\n", (int)data.size, (long)thelval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_integer));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
+
+#ifdef RDFSTORE_DEBUG
+				{
+				int             i;
+				if ((rdfstore_flat_store_fetch(me->xsd_integer, key, &data)) == 0) {
+					me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+					RDFSTORE_FREE(data.data);
+				};
+				printf("REMOVED (%d) integer '%ld' of literal '%s' -->'", st_id, (long)thelval, statement->object->value.literal.string);
+				for (i = 0; i < outsize; i++) {
+					printf("%02X", me->bits_decode[i]);
+				};
+				printf("'\n");
+				}
+#endif
+			} else {
+				err = rdfstore_flat_store_delete(me->xsd_integer, key);
+				if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        		rdfstore_iterator_close(reindex);
+#endif
+					if (err != FLAT_STORE_E_NOTFOUND) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_integer));
+               					return -1;
+					} else {
+						return 1;
+						};
+               				};
+#ifdef RDFSTORE_DEBUG
+				printf("DELETED (%d) integer table integer '%ld'\n", st_id, (long)thelval);
+#endif
+				};
+			};
+
+		/* for xsd:double or xsd:float alike literals use special b-tree sorted index if strtod() works.... */
+		if(	( islval == 0 ) && /* do not index xsd:integer(s) twice also as xsd:double */
+			( ( isdval = rdfstore_xsd_deserialize_double( statement->object->value.literal.string, &thedval ) ) != 0 ) ) {
+			key.data = (double*) &thedval; /* should pack int perhaps... */
+			key.size = sizeof(double);
+
+#ifdef RDFSTORE_DEBUG
+fprintf(stderr, "REMOVE DOUBLE '%f' for LITERAL '%s' \n",thedval, statement->object->value.literal.string);
+#endif
+
+			err = rdfstore_flat_store_fetch_compressed(me->xsd_double, me->func_decode, key, &outsize, me->bits_decode);
+			if (err != 0) {
+				if (err != FLAT_STORE_E_NOTFOUND) {
+					perror("rdfstore_remove");
+					fprintf(stderr,"Could not fetch double '%f' of literal '%s' for store '%s': %s\n", thedval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_double));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+					rdfstore_iterator_close(reindex);
+#endif
+					return -1;
+				} else {
+					outsize = 0;
+					};
+				};
+
+			/* reset the right bit to zero */
+			rdfstore_bits_setmask(&outsize, me->bits_decode, st_id, 1, 0, sizeof(me->bits_decode));
+
+                	outsize = rdfstore_bits_shorten(outsize, me->bits_decode);
+			if (outsize) {
+				err = rdfstore_flat_store_store_compressed(me->xsd_double, me->func_encode, 
+							key, outsize, me->bits_decode, me->bits_encode);
+				if (err == 0) {
+#ifdef RDFSTORE_DEBUG_COMPRESSION
+					fprintf(stderr,"Stored %d bytes for double '%f' in double table for store '%s'\n", outsize, thedval, (me->name != NULL) ? me->name : "(in-memory)");
+#endif
+				} else {
+					if (err != FLAT_STORE_E_KEYEXIST) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not store '%d' bytes for double '%f' of literal '%s' in double table for store '%s': %s\n", (int)data.size, thedval, statement->object->value.literal.string, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_double));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+						rdfstore_iterator_close(reindex);
+#endif
+						return -1;
+						};
+					};
+
+#ifdef RDFSTORE_DEBUG
+				{
+				int             i;
+				if ((rdfstore_flat_store_fetch(me->xsd_double, key, &data)) == 0) {
+					me->func_decode(data.size, data.data, &outsize, me->bits_decode);
+					RDFSTORE_FREE(data.data);
+				};
+				printf("REMOVED (%d) double '%f' of literal '%s' -->'", st_id, thedval, statement->object->value.literal.string);
+				for (i = 0; i < outsize; i++) {
+					printf("%02X", me->bits_decode[i]);
+				};
+				printf("'\n");
+				}
+#endif
+			} else {
+				err = rdfstore_flat_store_delete(me->xsd_double, key);
+				if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                        		rdfstore_iterator_close(reindex);
+#endif
+					if (err != FLAT_STORE_E_NOTFOUND) {
+						perror("rdfstore_remove");
+						fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->xsd_double));
+               					return -1;
+					} else {
+						return 1;
+						};
+               				};
+#ifdef RDFSTORE_DEBUG
+				printf("DELETED (%d) double table double '%f'\n", st_id, thedval);
+#endif
+				};
+			};
+
+		}; /* end remove special literal stuff */
 
 	/* removed one statement */
 	key.data = RDFSTORE_COUNTER_REMOVED_KEY;
@@ -6362,7 +7273,46 @@ MX;
 	packInt(hc, outbuf);
 	key.data = outbuf;
 	key.size = sizeof(int);
-	rdfstore_flat_store_delete(me->statements, key);
+	err = rdfstore_flat_store_delete(me->statements, key);
+	if (err != 0) {
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+		rdfstore_iterator_close(reindex);
+#endif
+		if (err != FLAT_STORE_E_NOTFOUND) {
+			perror("rdfstore_remove");
+			fprintf(stderr,"Could not delete statement for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->statements));
+			return -1;
+		} else {
+			return 1;
+			};
+	} else {
+		/* touch DB last modified date */
+		bzero(&thedateval_tm, sizeof( struct tm ) );
+
+        	time(&now);
+
+        	ptm = gmtime(&now);
+        	memcpy(&thedateval_tm, ptm, sizeof(struct tm));
+
+        	rdfstore_xsd_serialize_dateTime( thedateval_tm, thedateval );
+
+        	key.data = RDFSTORE_LASTMODIFIED_KEY;
+        	key.size = sizeof(RDFSTORE_LASTMODIFIED_KEY);
+
+        	data.data = thedateval;
+        	data.size = strlen(thedateval) + 1;
+
+        	err = rdfstore_flat_store_store(me->model, key, data);
+        	if (    (err != 0) &&
+                	(err != FLAT_STORE_E_KEYEXIST) ) {
+			perror("rdfstore_remove");
+                	fprintf(stderr,"Could not store last modified date in model for store '%s': %s\n", (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->model));
+#if defined(RDFSTORE_CONNECTIONS) && defined(RDFSTORE_CONNECTIONS_REINDEXING)
+                	rdfstore_iterator_close(reindex);
+#endif
+                	return -1;
+                	};
+		};
 
 	if ((me->sync) &&
 	    (!(me->flag))) {
@@ -6386,6 +7336,12 @@ MX;
                         rdfstore_flat_store_sync(me->languages);
                 if (me->datatypes)
                         rdfstore_flat_store_sync(me->datatypes);
+                if (me->xsd_integer)
+                        rdfstore_flat_store_sync(me->xsd_integer);
+                if (me->xsd_double)
+                        rdfstore_flat_store_sync(me->xsd_double);
+                if (me->xsd_date)
+                        rdfstore_flat_store_sync(me->xsd_date);
                 if (me->freetext)
                         rdfstore_flat_store_sync(me->windex);
 	};
@@ -6395,12 +7351,11 @@ MX;
 #endif
 
 	return 0;
-};
+	};
 
 rdfstore_iterator *
 rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 	RDF_Triple_Pattern_Part * tpj=NULL;
-	RDF_Node       *context = NULL;
 	rdfstore_iterator *results;
 	DBT             key, data;
 	int             err = 0;
@@ -6408,13 +7363,13 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 						 * memory */
 	unsigned int    utf8_size = 0;
 
-	/* bear in mind that with a single nindex table these index tables should be bigger than this! (MAXRECORDS*NUM_BITS_IN_TABLE) */
-	static unsigned char bits[MAXRECORDS_BYTES_SIZE];	/* for logical
+	/* bear in mind that with a single nindex table these index tables should be bigger than this! (RDFSTORE_MAXRECORDS*NUM_BITS_IN_TABLE) */
+	static unsigned char bits[RDFSTORE_MAXRECORDS_BYTES_SIZE];	/* for logical
 							 * operations -
 							 * expensive to
 							 * allocate??? */
-	static unsigned char bits1[MAXRECORDS_BYTES_SIZE]; /* general temporary */
-	static unsigned char bits2[MAXRECORDS_BYTES_SIZE]; /* temporary for OR of s,p,o,c */
+	static unsigned char bits1[RDFSTORE_MAXRECORDS_BYTES_SIZE]; /* general temporary */
+	static unsigned char bits2[RDFSTORE_MAXRECORDS_BYTES_SIZE]; /* temporary for OR of s,p,o,c */
 	unsigned int    outsize1 = 0;
 	unsigned int    outsize2 = 0;
 	unsigned int    outsize3 = 0;
@@ -6506,6 +7461,17 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 				(tp->words_operator > 2) )
 				return NULL;
 			};
+		if ( tp->ranges != NULL ) {
+			tpj = tp->ranges;	
+			do {
+	      			if ( tpj->type != RDFSTORE_TRIPLE_PATTERN_PART_STRING )
+					return NULL;
+			} while ( ( tpj = tpj->next ) != NULL );
+
+			if (	(tp->ranges_operator < 0 ) || /* it is unsigned int anyway... */
+				(tp->ranges_operator > 10) )
+				return NULL;
+			};
 		};
 
 	if (	( me->freetext ) &&
@@ -6520,18 +7486,6 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 	memset(&key, 0, sizeof(key));
 	memset(&data, 0, sizeof(data));
 
-	if (	(tp != NULL) &&
-	    	(tp->contexts != NULL) ) {
-		context = tp->contexts->part.node;
-	} else {
-		/*
-		 * use default context unless internal use i.e. where the
-		 * (internal function) caller knows what it is doing :)
-		 */
-		if (me->context != NULL)
-			context = me->context;
-		};
-
 #ifdef RDFSTORE_DEBUG
 	fprintf(stderr,"TO SEARCH:\n");
 	fprintf(stderr,"search type=%d\n",search_type);
@@ -6540,8 +7494,7 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 #endif
 
 	/* if the query was empty return the whole thing */
-	if ( ((tp == NULL) &&
-	      (context == NULL)) ||
+	if ( (tp == NULL) ||
 	     ((tp != NULL) &&
 	      (tp->subjects == NULL) &&
 	      (tp->predicates == NULL) &&
@@ -6549,7 +7502,8 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 	      (tp->contexts == NULL) &&
 	      (tp->langs == NULL) &&
 	      (tp->dts == NULL) &&
-	      (tp->words == NULL) ) ) {
+	      (tp->words == NULL) &&
+	      (tp->ranges == NULL) ) ) {
 		return rdfstore_elements(me);
 		};
 
@@ -6585,7 +7539,7 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 	};
 	results->store = me;
 	results->store->attached++;
-	/* bzero(results->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)); */
+	/* bzero(results->ids,sizeof(unsigned char)*(RDFSTORE_MAXRECORDS_BYTES_SIZE)); */
 	results->remove_holes = 0;	/* reset the total number of holes */
 	results->st_counter = 0;
 	results->pos = 0;
@@ -6593,7 +7547,8 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 	results->size = 0;
 
 	/* do any words combination first */
-	if (tp->words != NULL) {
+	if (	( me->freetext ) &&
+		( tp->words != NULL ) ) {
 		tpj = tp->words;
 		do {
 			utf8_casefolded_buff = (unsigned char *)RDFSTORE_MALLOC(strlen(tpj->part.string) * sizeof(unsigned char) * 
@@ -6627,12 +7582,6 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
 				};
 			} else {
 				if (outsize1 > 0) {
-					/*
-					 * we could probably stop the
-					 * following operations at
-					 * MAXRECORDS_BITS_SIZE bytes due to odd
-					 * statements stuff (old comment to be removed?? :-)
-					 */
 					me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
 					if (tp->words_operator == 1) {
 						/* and them */
@@ -7232,6 +8181,712 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
                                 }
 #endif
 			};
+
+		/* numerical comparinson one */
+		if ( tp->ranges != NULL ) {
+			int islval=0;
+			int isdval=0;
+			int isdateval=0;
+			long thelval[2];
+			long alval;
+			double thedval[2];
+			double adval;
+			struct tm thedateval_tm[2];
+			char thedateval[2][RDFSTORE_XSD_DATETIME_FORMAT_SIZE];
+			char adateval[RDFSTORE_XSD_DATETIME_FORMAT_SIZE];
+			int last=0;
+
+			tpj = tp->ranges; /* we simply just take the first/head of the list */
+
+			/* guess out the type from the given string */
+			if( ( islval = rdfstore_xsd_deserialize_integer( tpj->part.string, &thelval[0] ) ) == 0 ) /* do not fetch xsd:integer(s) twice also as xsd:double */
+				isdval = rdfstore_xsd_deserialize_double( tpj->part.string, &thedval[0] );
+
+			if(	(! islval) &&
+				(! isdval) ) {
+				isdateval = rdfstore_xsd_deserialize_dateTime( tpj->part.string, &thedateval_tm[0] );
+
+				if( ! isdateval ) {
+					isdateval = rdfstore_xsd_deserialize_date( tpj->part.string, &thedateval_tm[0] );
+					};
+				
+				if( ! isdateval ) {
+					/* unknown... */
+					rdfstore_iterator_close(results);
+                                	return NULL;
+					};
+
+				rdfstore_xsd_serialize_dateTime( thedateval_tm[0], thedateval[0] ); /* we index xsd:dataTime version anyway */
+				};
+
+			if (    (tp->ranges_operator > 6 ) &&
+                                (tp->ranges_operator < 11) ) {
+				tpj = tpj->next;
+
+				if ( tpj == NULL ) {
+					/* error... */
+					rdfstore_iterator_close(results);
+                                	return NULL;
+					};
+
+				/* we can use ranges of the same kind only */
+				if(islval!=0) {
+					if( rdfstore_xsd_deserialize_integer( tpj->part.string, &thelval[1] ) == 0 ) {
+						/* error... */
+						rdfstore_iterator_close(results);
+                                		return NULL;
+						};
+				} else if(isdval!=0) {
+					if( rdfstore_xsd_deserialize_double( tpj->part.string, &thedval[1] ) == 0 ) {
+						/* error... */
+						rdfstore_iterator_close(results);
+                                		return NULL;
+						};
+				} else {
+					if( rdfstore_xsd_deserialize_dateTime( tpj->part.string, &thedateval_tm[1] ) == 0 ) {
+						if( rdfstore_xsd_deserialize_date( tpj->part.string, &thedateval_tm[1] ) == 0 ) {
+							/* error... */
+							rdfstore_iterator_close(results);
+                                			return NULL;
+							};
+						};
+
+					rdfstore_xsd_serialize_dateTime( thedateval_tm[1], thedateval[1] ); /* we index xsd:dataTime version anyway */
+					};
+				};
+
+			outsize3=0;
+
+			if (	( tp->ranges_operator == 1 ) ||
+				( tp->ranges_operator == 2 ) ) { /* x < a  or x <= a */
+				if (rdfstore_flat_store_first( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date , &key) == 0) {
+					do {
+						if(islval!=0) {
+							memcpy( &alval, key.data, sizeof(long) );
+							if( alval == thelval[0] ) {
+								if( tp->ranges_operator == 2 ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if ( alval > thelval[0] ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+						} else if(isdval!=0) {
+							memcpy( &adval, key.data, sizeof(double) );
+							if( adval == thedval[0] ) {
+								if( tp->ranges_operator == 2 ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if ( adval > thedval[0] ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+						} else {
+							memcpy( adateval, key.data, key.size );
+							if( strcmp( adateval, thedateval[0] ) == 0 ) {
+								if( tp->ranges_operator == 2 ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if ( strcmp( adateval, thedateval[0] ) > 0 ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+							};
+						err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						if (err != 0) {
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_search");
+								fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+								rdfstore_iterator_close(results);
+								return NULL;
+							} else {
+								continue;
+								};
+						} else {
+							if (outsize3 > 0) {
+                                                		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                                		/* or each of them  */
+                                                        	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                        			outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                        			bcopy(bits1, bits2, outsize3);   /* slow? */
+							} else {
+                                                		me->func_decode(data.size, data.data, &outsize3, bits2);
+								};
+							RDFSTORE_FREE(data.data);
+							};
+
+#ifdef RDFSTORE_DEBUG
+                                		{
+                                		int             j;
+						if(islval!=0) {
+                                			printf("SEARCH '%ld' <%s '%ld' -->'", (long)alval, ( ( tp->ranges_operator == 2 ) ? "=" : "" ), (long)thelval[0]);
+						} else if(isdval!=0) {
+                                			printf("SEARCH '%f' <%s '%f' -->'", adval, ( ( tp->ranges_operator == 2 ) ? "=" : "" ), thedval[0]);
+						} else {
+                                			printf("SEARCH '%s' <%s '%s' -->'", adateval, ( ( tp->ranges_operator == 2 ) ? "=" : "" ), thedateval[0]);
+							};
+                                		for(j=0;j<8*outsize3;j++) {
+                                        		printf("Rec %d %c\n", j, (bits2[j>>3] & (1<<(j&7))) ? '1':'0');
+                                        		};
+                                		printf("'\n");
+                                		}
+#endif
+			
+						if(last) {
+							RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+							break; /* x <= a */
+							};
+
+						/* hup the next one in b-tree order */
+						err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+						if (err == 0) {
+							key = data;
+							};
+						} while (err == 0);
+					};
+			} else if ( tp->ranges_operator == 3 ) { /* x == y */
+				/* simple fetch and AND */
+				if(islval!=0) {
+					key.data = (long*) &thelval[0]; /* should pack int perhaps... */
+					key.size = sizeof(long);
+				} else if(isdval!=0) {
+					key.data = (double*) &thedval[0]; /* should pack int perhaps... */
+					key.size = sizeof(double);
+				} else {
+					key.data = thedateval[0];
+					key.size = strlen(thedateval[0])+1;
+					};
+				err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+				if (err != 0) {
+					if (err != FLAT_STORE_E_NOTFOUND) {
+						perror("rdfstore_search");
+						fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+						rdfstore_iterator_close(results);
+						return NULL;
+					} else {
+						/* error or no matches?... */
+						rdfstore_iterator_close(results);
+						return NULL;
+						};
+				} else {
+					if (outsize3 > 0) {
+                                       		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                       		/* or each of them  */
+                                               	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                       		outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                       		bcopy(bits1, bits2, outsize3);   /* slow? */
+					} else {
+                                       		me->func_decode(data.size, data.data, &outsize3, bits2);
+						};
+					RDFSTORE_FREE(data.data);
+					};
+
+#ifdef RDFSTORE_DEBUG
+                                {
+                                int             j;
+				if(islval!=0) {
+                                	printf("SEARCH '%ld' == '%ld' -->'", (long)alval, (long)thelval[0]);
+				} else if(isdval!=0) {
+                                	printf("SEARCH '%f' == '%f' -->'", adval, thedval[0]);
+				} else {
+                                	printf("SEARCH '%s' == '%s' -->'", adateval, thedateval[0]);
+					};
+                                for(j=0;j<8*outsize3;j++) {
+                                       	printf("Rec %d %c\n", j, (bits2[j>>3] & (1<<(j&7))) ? '1':'0');
+                                       	};
+                                printf("'\n");
+                                }
+#endif
+			} else if ( tp->ranges_operator == 4 ) { /* x != y */
+				if (rdfstore_flat_store_first( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date , &key) == 0) {
+					do {
+						if(islval!=0) {
+							memcpy( &alval, key.data, sizeof(long) );
+							if( alval == thelval[0] ) {
+								/* hup the next one in b-tree order */
+								err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+								RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+								if (err == 0) {
+									key = data;
+									};
+								continue;
+								};
+						} else if(isdval!=0) {
+							memcpy( &adval, key.data, sizeof(double) );
+							if( adval == thedval[0] ) {
+								/* hup the next one in b-tree order */
+								err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+								RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+								if (err == 0) {
+									key = data;
+									};
+								continue;
+								};
+						} else {
+							memcpy( adateval, key.data, key.size );
+							if( strcmp( adateval, thedateval[0] ) == 0 ) {
+								/* hup the next one in b-tree order */
+								err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+								RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+								if (err == 0) {
+									key = data;
+									};
+								continue;
+								};
+							};
+						err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						if (err != 0) {
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_search");
+								fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+								rdfstore_iterator_close(results);
+								return NULL;
+							} else {
+								continue;
+								};
+						} else {
+							if (outsize3 > 0) {
+                                                		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                                		/* or each of them  */
+                                                        	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                        			outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                        			bcopy(bits1, bits2, outsize3);   /* slow? */
+							} else {
+                                                		me->func_decode(data.size, data.data, &outsize3, bits2);
+								};
+							RDFSTORE_FREE(data.data);
+							};
+
+						/* hup the next one in b-tree order */
+						err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+						if (err == 0) {
+							key = data;
+							};
+						} while (err == 0);
+					};
+			} else if (	( tp->ranges_operator == 5 ) ||
+					( tp->ranges_operator == 6 ) ) { /* x >= a  or x > a */
+				if(islval!=0) {
+					data.data = (long*) &thelval[0]; /* should pack int perhaps... */
+					data.size = sizeof(long);
+				} else if(isdval!=0) {
+					data.data = (double*) &thedval[0]; /* should pack int perhaps... */
+					data.size = sizeof(double);
+				} else {
+					data.data = thedateval[0];
+					data.size = strlen(thedateval[0])+1;
+					};
+				if (rdfstore_flat_store_from( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, data, &key) == 0) {
+					do {
+						if(islval!=0) {
+							memcpy( &alval, key.data, sizeof(long) );
+							if( alval == thelval[0] ) {
+								if( tp->ranges_operator == 6 ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+						} else if(isdval!=0) {
+							memcpy( &adval, key.data, sizeof(double) );
+							if( adval == thedval[0] ) {
+								if( tp->ranges_operator == 6 ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+						} else {
+							memcpy( adateval, key.data, key.size );
+							if( strcmp( adateval, thedateval[0] ) == 0 ) {
+								if( tp->ranges_operator == 6 ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+							};
+						err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						if (err != 0) {
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_search");
+								fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+								rdfstore_iterator_close(results);
+								return NULL;
+							} else {
+								continue;
+								};
+						} else {
+							if (outsize3 > 0) {
+                                                		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                                		/* or each of them  */
+                                                        	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                        			outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                        			bcopy(bits1, bits2, outsize3);   /* slow? */
+							} else {
+                                                		me->func_decode(data.size, data.data, &outsize3, bits2);
+								};
+							RDFSTORE_FREE(data.data);
+							};
+
+#ifdef RDFSTORE_DEBUG
+                                		{
+                                		int             j;
+						if(islval!=0) {
+                                			printf("SEARCH '%ld' >%s '%ld' -->'", (long)alval, ( ( tp->ranges_operator == 5 ) ? "=" : "" ), (long)thelval[0]);
+						} else if(isdval!=0) {
+                                			printf("SEARCH '%f' >%s '%f' -->'", adval, ( ( tp->ranges_operator == 5 ) ? "=" : "" ), thedval[0]);
+						} else {
+                                			printf("SEARCH '%s' >%s '%s' -->'", adateval, ( ( tp->ranges_operator == 5 ) ? "=" : "" ), thedateval[0]);
+							};
+                                		for(j=0;j<8*outsize3;j++) {
+                                        		printf("Rec %d %c\n", j, (bits2[j>>3] & (1<<(j&7))) ? '1':'0');
+                                        		};
+                                		printf("'\n");
+                                		}
+#endif
+			
+						/* hup the next one in b-tree order */
+						err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+						if (err == 0) {
+							key = data;
+							};
+						} while (err == 0);
+					};
+			} else if (	( tp->ranges_operator > 6 ) &&
+					( tp->ranges_operator < 11 ) ) { /* 2 vars ranges */
+
+				/* b > a || b >= a */
+				if(islval!=0) {
+					data.data = (long*) &thelval[0]; /* should pack int perhaps... */
+					data.size = sizeof(long);
+				} else if(isdval!=0) {
+					data.data = (double*) &thedval[0]; /* should pack int perhaps... */
+					data.size = sizeof(double);
+				} else {
+					data.data = thedateval[0];
+					data.size = strlen(thedateval[0])+1;
+					};
+				if (rdfstore_flat_store_from( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, data, &key) == 0) {
+					do {
+						if(islval!=0) {
+							memcpy( &alval, key.data, sizeof(long) );
+							if( alval == thelval[0] ) {
+								if(	( tp->ranges_operator == 7 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+						} else if(isdval!=0) {
+							memcpy( &adval, key.data, sizeof(double) );
+							if( adval == thedval[0] ) {
+								if(	( tp->ranges_operator == 7 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+						} else {
+							memcpy( adateval, key.data, key.size );
+							if( strcmp( adateval, thedateval[0] ) == 0 ) {
+								if(	( tp->ranges_operator == 7 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x > a */
+									/* hup the next one in b-tree order */
+									err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+									RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+									if (err == 0) {
+										key = data;
+										continue;
+									} else {
+										break;
+										};
+									};
+								};
+							};
+						err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						if (err != 0) {
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_search");
+								fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+								rdfstore_iterator_close(results);
+								return NULL;
+							} else {
+								continue;
+								};
+						} else {
+							if (outsize3 > 0) {
+                                                		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                                		/* or each of them  */
+                                                        	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                        			outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                        			bcopy(bits1, bits2, outsize3);   /* slow? */
+							} else {
+                                                		me->func_decode(data.size, data.data, &outsize3, bits2);
+								};
+							RDFSTORE_FREE(data.data);
+							};
+
+#ifdef RDFSTORE_DEBUG
+                                		{
+                                		int             j;
+						if(islval!=0) {
+                                			printf("SEARCH '%ld' >%s '%ld' -->'", (long)alval, ( ( ( tp->ranges_operator == 8 ) || ( tp->ranges_operator == 9 ) ) ? "=" : "" ), (long)thelval[0]);
+						} else if(isdval!=0) {
+                                			printf("SEARCH '%f' >%s '%f' -->'", adval, ( ( ( tp->ranges_operator == 8 ) || ( tp->ranges_operator == 9 ) ) ? "=" : "" ), thedval[0]);
+						} else {
+                                			printf("SEARCH '%s' >%s '%s' -->'", adateval, ( ( ( tp->ranges_operator == 8 ) || ( tp->ranges_operator == 9 ) ) ? "=" : "" ), thedateval[0]);
+							};
+                                		for(j=0;j<8*outsize3;j++) {
+                                        		printf("Rec %d %c\n", j, (bits2[j>>3] & (1<<(j&7))) ? '1':'0');
+                                        		};
+                                		printf("'\n");
+                                		}
+#endif
+			
+						/* hup the next one in b-tree order */
+						err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+						if (err == 0) {
+							key = data;
+							};
+						} while (err == 0);
+					};
+
+				/* no matches */
+				if (!outsize3)
+					return results;
+
+				/* AND in all numerical comparinsons to previous rdf:datatype, words, subjects, predicates, objects and languages now */
+                        	if (outsize1 > 0) {
+                                	/* and them */
+                                	outsize1 = rdfstore_bits_and(outsize1, bits, outsize3, bits2, bits1);
+                                	outsize1 = rdfstore_bits_shorten(outsize1, bits1);
+
+                                	/* cannot join */
+                                	if (!outsize1) {
+                                        	return results;
+                                        	};
+
+                                	bcopy(bits1, bits, outsize1);   /* slow? */
+                        	} else {
+                                	/* or OR them */
+                                	outsize1 = rdfstore_bits_or(outsize3, bits, outsize3, bits2, bits1); 
+                                	bcopy(bits1, bits, outsize3);   /* slow? */
+                                	};
+
+				/* b < c || b <= c */
+				outsize3=0;
+
+				if (rdfstore_flat_store_first( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date , &key) == 0) {
+					do {
+						if(islval!=0) {
+							memcpy( &alval, key.data, sizeof(long) );
+							if( alval == thelval[1] ) {
+								if(	( tp->ranges_operator == 9 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if ( alval > thelval[1] ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+						} else if(isdval!=0) {
+							memcpy( &adval, key.data, sizeof(double) );
+							if( adval == thedval[1] ) {
+								if(	( tp->ranges_operator == 9 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if( adval > thedval[1] ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+						} else {
+							memcpy( adateval, key.data, key.size );
+							if( strcmp( adateval, thedateval[1] ) == 0 ) {
+								if(	( tp->ranges_operator == 9 ) ||
+									( tp->ranges_operator == 10 ) ) { /* x <= a */
+									last=1;
+								} else {
+									RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+									break; /* stop here - anything from the first key till x (excluded) */
+									};
+							} else if( strcmp( adateval, thedateval[1] ) > 0 ) {
+								RDFSTORE_FREE(key.data);
+								break;
+								};
+							};
+						err = rdfstore_flat_store_fetch( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						if (err != 0) {
+							if (err != FLAT_STORE_E_NOTFOUND) {
+								perror("rdfstore_search");
+								fprintf(stderr,"Could not fetch key '%s' for range for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error( (islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date ));
+								rdfstore_iterator_close(results);
+								return NULL;
+							} else {
+								continue;
+								};
+						} else {
+							if (outsize3 > 0) {
+                                                		me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
+
+                                                		/* or each of them  */
+                                                        	outsize3 = rdfstore_bits_or(outsize3, bits2, outsize2, me->bits_decode, bits1);
+
+                                        			outsize3 = rdfstore_bits_shorten(outsize3, bits1);
+                                        			bcopy(bits1, bits2, outsize3);   /* slow? */
+							} else {
+                                                		me->func_decode(data.size, data.data, &outsize3, bits2);
+								};
+							RDFSTORE_FREE(data.data);
+							};
+
+#ifdef RDFSTORE_DEBUG
+                                		{
+                                		int             j;
+						if(islval!=0) {
+                                			printf("SEARCH '%ld' <%s '%ld' -->'", (long)alval, ( ( ( tp->ranges_operator == 9 ) || ( tp->ranges_operator == 10 ) ) ? "=" : "" ), (long)thelval[1]);
+						} else if(isdval!=0) {
+                                			printf("SEARCH '%f' <%s '%f' -->'", adval, ( ( ( tp->ranges_operator == 9 ) || ( tp->ranges_operator == 10 ) ) ? "=" : "" ), thedval[1]);
+						} else {
+                                			printf("SEARCH '%s' <%s '%s' -->'", adateval, ( ( ( tp->ranges_operator == 9 ) || ( tp->ranges_operator == 10 ) ) ? "=" : "" ), thedateval[1]);
+							};
+                                		for(j=0;j<8*outsize3;j++) {
+                                        		printf("Rec %d %c\n", j, (bits2[j>>3] & (1<<(j&7))) ? '1':'0');
+                                        		};
+                                		printf("'\n");
+                                		}
+#endif
+			
+						if(last) {
+							RDFSTORE_FREE(key.data);	/* dispose the key fetched above */
+							break; /* x <= a */
+							};
+
+						/* hup the next one in b-tree order */
+						err = rdfstore_flat_store_next((islval!=0) ? me->xsd_integer : (isdval!=0) ? me->xsd_double : me->xsd_date, key, &data);
+						RDFSTORE_FREE(key.data);	/* dispose the previous/current key */
+						if (err == 0) {
+							key = data;
+							};
+						} while (err == 0);
+					};
+				};
+
+			/* no matches */
+			if (!outsize3)
+				return results;
+
+			/* AND in all numerical comparinsons to previous rdf:datatype, words, subjects, predicates, objects and languages now */
+                        if (outsize1 > 0) {
+                                /* and them */
+                                outsize1 = rdfstore_bits_and(outsize1, bits, outsize3, bits2, bits1);
+                                outsize1 = rdfstore_bits_shorten(outsize1, bits1);
+
+                                /* cannot join */
+                                if (!outsize1) {
+                                        return results;
+                                        };
+
+                                bcopy(bits1, bits, outsize1);   /* slow? */
+                        } else {
+                                /* or OR them */
+                                outsize1 = rdfstore_bits_or(outsize3, bits, outsize3, bits2, bits1); 
+                                bcopy(bits1, bits, outsize3);   /* slow? */
+                                };
+
+#ifdef RDFSTORE_DEBUG
+                                {
+                                int             j;
+				if(islval!=0) {
+                                	printf("SEARCH X %s '%ld' -->'", (tp->ranges_operator ==1) ? "<" :
+									 (tp->ranges_operator ==2) ? "<=" :
+									 (tp->ranges_operator ==3) ? "==" :
+									 (tp->ranges_operator ==4) ? "!=" :
+									 (tp->ranges_operator ==5) ? ">=": 
+									 (tp->ranges_operator ==6) ? ">": 
+									 (tp->ranges_operator ==7) ? "a < b < c": 
+									 (tp->ranges_operator ==8) ? "a <= b < c": 
+									 (tp->ranges_operator ==9) ? "a <= b <= c": "a < b <= c", (long)thelval[0]);
+				} else {
+                                	printf("SEARCH X %s '%f' -->'", (tp->ranges_operator ==1) ? "<" :
+									(tp->ranges_operator ==2) ? "<=" :
+									(tp->ranges_operator ==3) ? "==" :
+									(tp->ranges_operator ==4) ? "!=" :
+									(tp->ranges_operator ==5) ? ">=": 
+									(tp->ranges_operator ==6) ? ">": 
+									(tp->ranges_operator ==7) ? "a < b < c": 
+									(tp->ranges_operator ==8) ? "a <= b < c": 
+									(tp->ranges_operator ==9) ? "a <= b <= c": "a < b <= c", thedval[0]);
+					};
+                                for(j=0;j<8*outsize1;j++) {
+                                        printf("Rec %d %c\n", j, (bits[j>>3] & (1<<(j&7))) ? '1':'0');
+                                        };
+                                printf("'\n");
+                                }
+#endif
+			};
 		};
 
 	if ( tp->contexts != NULL ) {
@@ -7320,56 +8975,7 @@ rdfstore_search(rdfstore * me, RDF_Triple_Pattern * tp, int search_type) {
                 printf("'\n");
                 }
 #endif
-	} else if (context != NULL) {
-		/* compute context hashcode */
-		context->hashcode = rdfstore_digest_get_node_hashCode(context, 0);
-
-		packInt(context->hashcode, outbuf);
-		key.data = outbuf;
-		key.size = sizeof(int);
-
-		err = rdfstore_flat_store_fetch(me->contexts, key, &data);
-		if (err != 0) {
-			if (err != FLAT_STORE_E_NOTFOUND) {
-				perror("rdfstore_search");
-				fprintf(stderr,"Could not fetch key '%s' in contexts for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->contexts));
-				rdfstore_iterator_close(results);
-				return NULL;
-			} else {
-				/* cannot join */
-				return results;
-			};
-		} else {
-			if (outsize1 > 0) {
-				me->func_decode(data.size, data.data, &outsize2, me->bits_decode);
-
-				/* and them */
-				outsize1 = rdfstore_bits_and(outsize1, bits, outsize2, me->bits_decode, bits1);
-				outsize1 = rdfstore_bits_shorten(outsize1, bits1);
-
-				if (!outsize1) {
-					RDFSTORE_FREE(data.data);
-					return results;
-				};
-
-				bcopy(bits1, bits, outsize1);	/* slow? */
-			} else {
-				me->func_decode(data.size, data.data, &outsize1, bits);
-			};
-			RDFSTORE_FREE(data.data);
 		};
-
-#ifdef RDFSTORE_DEBUG
-                {
-                int             j;
-                printf("SEARCH contexts for C -->'");
-                for(j=0;j<8*outsize1;j++) {
-                	printf("Rec %d %c\n", j, (bits[j>>3] & (1<<(j&7))) ? '1':'0');
-                        };
-                printf("'\n");
-                }
-#endif
-	};
 
 #ifdef RDFSTORE_DEBUG
 	{
@@ -7486,7 +9092,7 @@ _rdfstore_recursive_fetch_object( rdfstore * me,
                 };
         subject_results->store = me;
         subject_results->store->attached++;
-        /* bzero(subject_results->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)); */
+        /* bzero(subject_results->ids,sizeof(unsigned char)*(RDFSTORE_MAXRECORDS_BYTES_SIZE)); */
         subject_results->remove_holes = 0;      /* reset the total number of holes */
         subject_results->st_counter = 0;
         subject_results->pos = 0;
@@ -7592,6 +9198,10 @@ _rdfstore_recursive_fetch_object( rdfstore * me,
         return 0;
 	};
 
+/*
+   Work in progress implementation of http://www.w3.org/Submission/CBD/ - it does not implement "Inverse Functional Bounded Description" yet
+   See also http://www.w3.org/TR/rdf-sparql-query/#describe
+   */
 rdfstore_iterator *
 rdfstore_fetch_object( rdfstore * me, RDF_Node * resource, RDF_Node * given_context ) {
 	RDF_Node       *context = NULL;
@@ -7600,11 +9210,11 @@ rdfstore_fetch_object( rdfstore * me, RDF_Node * resource, RDF_Node * given_cont
         int             err = 0;
         unsigned int    context_outsize = 0;
         unsigned char   outbuf[256];
-	static unsigned char bits[MAXRECORDS_BYTES_SIZE];
+	static unsigned char bits[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 
-	/* just start from a real URI-ed resource node and follow its associated bNodes (connected to its statements) */
+	/* just start from a resource (URI or bNode) and follow its associated bNodes (connected to its statements) */
 	if ( (resource == NULL) ||
-	     (resource->type == 2) ||
+	     (resource->type == RDFSTORE_NODE_TYPE_LITERAL) ||
 	     (resource->value.resource.identifier == NULL) ||
 	     (	(given_context != NULL) &&
 		(given_context->value.resource.identifier == NULL)) )
@@ -7644,7 +9254,7 @@ rdfstore_fetch_object( rdfstore * me, RDF_Node * resource, RDF_Node * given_cont
 		};
 	results->store = me;
 	results->store->attached++;
-	/*bzero(results->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE));*/
+	/*bzero(results->ids,sizeof(unsigned char)*(RDFSTORE_MAXRECORDS_BYTES_SIZE));*/
 	results->remove_holes = 0;	/* reset the total number of holes */
 	results->st_counter = 0;
 	results->pos = 0;
@@ -7746,15 +9356,10 @@ rdfstore_contains(
 	if (given_context == NULL) {
 		if (statement->context != NULL)
 			context = statement->context;
-		else {
-			/* use default context */
-			if (me->context != NULL)
-				context = me->context;
-		};
 	} else {
 		/* use given context instead */
 		context = given_context;
-	};
+		};
 
 #ifdef RDFSTORE_DEBUG
 	{
@@ -7852,7 +9457,7 @@ rdfstore_set_context(
 	 * NOTE: bear in mind that here we use a ref/pointer instead to
 	 * really allocate and copy the stuff across; correct??
 	 */
-	if ((me->context == NULL) &&
+	if ((me->context == NULL) && /* we explicitly need to reset_context() first if need to replace the current one */
 	    (given_context != NULL)) {
 
 #ifdef RDFSTORE_DEBUG
@@ -7903,7 +9508,9 @@ rdfstore_reset_context(
 	if (me->context != NULL) {
 		RDFSTORE_FREE(me->context->value.resource.identifier);
 		RDFSTORE_FREE(me->context);
-	};
+	} else {
+		return 1;
+		};
 
 	me->context = NULL;
 
@@ -7920,7 +9527,7 @@ rdfstore_get_context(
 		return me->context;
 	} else {
 		return NULL;
-	};
+		};
 };
 
 int 
@@ -8024,7 +9631,7 @@ rdfstore_elements(
 	cursor->store = me;
 	me->attached++;
 
-	/* bzero(cursor->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)); */
+	/* bzero(cursor->ids,sizeof(unsigned char)*(RDFSTORE_MAXRECORDS_BYTES_SIZE)); */
 	cursor->size = 0;
 	cursor->remove_holes = 0;	/* reset the total of holes */
 	cursor->st_counter = 0;
@@ -8042,14 +9649,14 @@ rdfstore_elements(
 				 * not sure rdfstore_bits_setmask() actually
 				 * sets ids_size right.....
 				 */
-				rdfstore_bits_setmask(&cursor->ids_size, cursor->ids, st_id, 1, 1, sizeof(unsigned char) * (MAXRECORDS_BITS_SIZE));
+				rdfstore_bits_setmask(&cursor->ids_size, cursor->ids, st_id, 1, 1, sizeof(cursor->ids));
 
 				cursor->size++;
 			} else {
 				RDFSTORE_FREE(key.data);
 				RDFSTORE_FREE(cursor);
 				perror("rdfstore_elements");
-				fprintf(stderr,"Could not fetch key '%s' in windex for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->statements));
+				fprintf(stderr,"Could not fetch key '%s' in statements for store '%s': %s\n", (char *)key.data, (me->name != NULL) ? me->name : "(in-memory)", rdfstore_flat_store_get_error(me->statements));
 				return NULL;
 			};
 			/* set the right bit */
@@ -8390,6 +9997,13 @@ RDF_Node * rdfstore_literal_new(
 	/* set xml:lang */
 	if (	( lang != NULL ) &&
                 ( strlen(lang) > 0 ) ) {
+		if ( strlen(lang) > RDFSTORE_MAX_LANG_LENGTH ) {
+			perror("rdfstore_literal_new");
+			fprintf(stderr,"Literal xml:lang '%s' is too long. Max allowed is %d characters long\n", lang, RDFSTORE_MAX_LANG_LENGTH );
+			rdfstore_node_free( node );
+			return NULL;
+			};
+
 		strcpy( node->value.literal.lang, lang );
 	} else {
 		strcpy( node->value.literal.lang, "\0" ); /* or =NULL ? */
@@ -9089,7 +10703,7 @@ int rdfstore_statement_equals(
 
 	if (	( st1 == NULL ) ||
 		( st2 == NULL ) )
-		return NULL;
+		return 0;
 
 	if (	( st1->context != NULL ) &&
 		( st2->context != NULL ) ) {
@@ -9332,6 +10946,8 @@ RDF_Triple_Pattern * rdfstore_triple_pattern_new() {
 	tp->dts_operator=0;
 	tp->words=NULL;
 	tp->words_operator=0;
+	tp->ranges=NULL;
+	tp->ranges_operator=0;
 
 	return tp;
 	};
@@ -9697,6 +11313,64 @@ int rdfstore_triple_pattern_set_words_operator(
         return 1;
 	};
 
+RDF_Triple_Pattern_Part * rdfstore_triple_pattern_add_ranges(
+	RDF_Triple_Pattern * tp,
+	char * num,
+	int len ) {
+	RDF_Triple_Pattern_Part * li=NULL;
+	RDF_Triple_Pattern_Part * li1=NULL;
+	RDF_Triple_Pattern_Part * tail=NULL;
+
+        if (    ( tp == NULL ) ||
+                ( num == NULL ) ||
+		( len <= 0 ) )
+                return NULL;
+
+        li = (RDF_Triple_Pattern_Part *)RDFSTORE_MALLOC(sizeof(RDF_Triple_Pattern_Part));
+
+        if( li == NULL )
+                return NULL;
+
+        li->type = RDFSTORE_TRIPLE_PATTERN_PART_STRING;
+	li->part.node = NULL;
+
+	li->part.string = NULL;
+        li->part.string = (unsigned char *) RDFSTORE_MALLOC( sizeof(unsigned char) * len );
+        if ( li->part.string == NULL ) {
+                RDFSTORE_FREE( li );
+                return NULL;
+                };
+        memcpy( li->part.string, num, len );
+        memcpy( li->part.string+len, "\0", 1);
+
+	li->next = NULL;
+
+        if ( tp->ranges != NULL ) {
+                li1 = tp->ranges;
+                do {
+                        tail = li1;
+                } while ( ( li1 = li1->next ) != NULL );
+                tail->next = li;
+        } else {
+                tp->ranges = li;
+                };
+
+        return li;
+	};
+
+int rdfstore_triple_pattern_set_ranges_operator(
+	RDF_Triple_Pattern * tp,
+	int op ) {
+	if (    ( tp == NULL ) ||
+		( op < 0 ) ||
+		( op > 10 ) )
+                return 0;
+
+        tp->ranges_operator = op;
+
+        return 1;
+	};
+
 int _rdfstore_triple_pattern_free_part(
 	RDF_Triple_Pattern_Part * list ) {
 	if ( list == NULL )
@@ -9739,6 +11413,9 @@ int rdfstore_triple_pattern_free(
 
 	if ( tp->dts != NULL )
 		_rdfstore_triple_pattern_free_part( tp->dts );
+
+	if ( tp->ranges != NULL )
+		_rdfstore_triple_pattern_free_part( tp->ranges );
 
 	if ( tp->words != NULL )
 		_rdfstore_triple_pattern_free_part( tp->words );
@@ -9797,6 +11474,21 @@ void rdfstore_triple_pattern_dump(
                                 fprintf(stderr,"\trdf:datatype='%s'\n", tpj->part.string );
                                 } while ( ( tpj = tpj->next ) != NULL );
                         };
+                if (tp->ranges != NULL) {
+                        fprintf(stderr,"Ranges: (%s)\n", ( tp->ranges_operator == 1 ) ? "<" :
+									( tp->ranges_operator == 2 ) ? "<=" :
+									( tp->ranges_operator == 3 ) ? "==" :
+									( tp->ranges_operator == 4 ) ? "!=" :
+									( tp->ranges_operator == 5 ) ? ">=" :
+									( tp->ranges_operator == 6 ) ? ">": 
+									( tp->ranges_operator == 7 ) ? "a < b < c": 
+									( tp->ranges_operator == 8 ) ? "a <= b < c": 
+									( tp->ranges_operator == 9 ) ? "a <= b <= c": "a < b <= c" );
+                        tpj = tp->ranges; /* it will have one element only anyway */
+                        do {
+                                fprintf(stderr,"\tterm='%s'\n", tpj->part.string );
+                                } while ( ( tpj = tpj->next ) != NULL );
+                        };
                 if (tp->words != NULL) {
                         fprintf(stderr,"Words: (%s)\n", ( tp->words_operator == 0 ) ? "OR" : ( tp->words_operator == 1 ) ? "AND" : "NOT");
                         tpj = tp->words;        
@@ -9805,7 +11497,7 @@ void rdfstore_triple_pattern_dump(
                                 } while ( ( tpj = tpj->next ) != NULL );
                         };
                 if (tp->contexts != NULL) {
-                        fprintf(stderr,"Contexts:\n");
+                        fprintf(stderr,"Contexts: (%s)\n", ( tp->contexts_operator == 0 ) ? "OR" : ( tp->contexts_operator == 1 ) ? "AND" : "NOT");
                         tpj = tp->contexts;     
                         do {
                                 fprintf(stderr,"\tC='%s'\n", tpj->part.node->value.resource.identifier );

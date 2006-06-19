@@ -9,7 +9,7 @@ my $factory = new RDFStore::NodeFactory();
 my $p=new RDFStore::Parser::SiRPAC(
 		Style => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory =>          $factory,
-                store   => { options => { FreeText => 1 } } );
+                style_options   => { store_options => { FreeText => 1 } } );
 
 my $model = $p->parsefile("http://www.kanzaki.com/info/rss.rdf");
 

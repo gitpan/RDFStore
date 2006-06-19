@@ -1,5 +1,33 @@
 Revision history for RDFStore tcp/ip backend storage
 
+version 1.7 (version taken from dbms/veersion.c)
+-------------------------------------------------------------------------------------------
+
+	utils/
+		- added dbms_mirror.pl to copy/mirror DBMS tables either locally or remotely
+
+	dbmsproxy/
+		- added dbmsproxy to use cheap local unix socket for reads if possible.
+
+	client/t/*
+		- updated to receive bt_compare_fcn_type paramter after mode
+
+	include/dbms.h
+		- added bt_compare_fcn_type to dbms struct
+
+	include/dbms_comms.h
+		- added TOKEN_FROM
+
+	deamon/hanlder.c
+		- added TOKEN_FROM handler for from() operation
+		- added bt_compare_fcn_type paramter management to receive from client
+                - fixed bug in frist(), next() methods to use the right macros depending on BDB version
+
+        libdbms/libdbms.c
+                - updated to use debug malloc/free
+		- added TOKEN_FROM
+		- added bt_compare_fcn_type paramter management to send to server
+
 version 1.2.
 -------------------------------------------------------------------------------------------
 

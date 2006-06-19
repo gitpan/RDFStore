@@ -51,7 +51,7 @@ int main ( int argc, char * argv[]) {
 	rdfstore * me;
 	FLATDB  * db;
 	DBT key, data, key1, data1;
-	static unsigned char bits[MAXRECORDS_BYTES_SIZE];
+	static unsigned char bits[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 	unsigned int outsize1=0;
 	int i, items, s1,s2;
 	long global_bytes_stats[256];

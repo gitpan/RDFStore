@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -11,7 +11,7 @@
  *     http://rdfstore.sourceforge.net/LICENSE
  *
  *
- * $Id: handler.c,v 1.43 2004/08/19 18:57:36 areggiori Exp $
+ * $Id: handler.c,v 1.48 2006/06/19 10:10:22 areggiori Exp $
  */ 
 
 #include "dbms.h"
@@ -25,6 +25,8 @@
 #include "children.h"
 #include "pathmake.h"
 
+#include "rdfstore_flat_store.h"
+
 dbase                 * first_dbp = NULL;
 
 #ifdef STATIC_BUFF
@@ -34,6 +36,28 @@ static int free_dbase_list_keep = 2;
 static int free_dbase_list_max = 8;
 #endif
 static int dbase_counter = 0;
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_dbms_compare_int(
+        const DBT *a,
+        const DBT *b );
+#else
+static int rdfstore_backend_dbms_compare_int(
+        DB *file,
+        const DBT *a,
+        const DBT *b );
+#endif
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_dbms_compare_double(
+        const DBT *a,
+        const DBT *b );
+#else
+static int rdfstore_backend_dbms_compare_double(
+        DB *file,
+        const DBT *a,
+        const DBT *b );
+#endif
 
 
 char * iprt( DBT * r ) {
@@ -165,6 +189,19 @@ int open_dbp( dbase * p ) {
 		0 		/* use current host order */
 		}; 
 #endif
+
+#ifdef BERKELEY_DB_1_OR_2 /* Berkeley DB Version 1  or 2 */
+#ifdef DB_VERSION_MAJOR
+        DB_INFO       btreeinfo;
+        memset(&btreeinfo, 0, sizeof(btreeinfo));
+        btreeinfo.bt_compare = ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_dbms_compare_int : ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_dbms_compare_double : NULL ;
+#else
+        BTREEINFO       btreeinfo;
+        memset(&btreeinfo, 0, sizeof(btreeinfo));
+        btreeinfo.compare = ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_dbms_compare_int : ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_dbms_compare_double : NULL ;
+#endif
+#endif
+
         umask(0);
 
 	/* XXX Do note that we _have_ a mode variable. We just ignore it.
@@ -180,7 +217,7 @@ int open_dbp( dbase * p ) {
 	if (    (db_open(	p->pfile, 
         			DB_BTREE,
 				DB_CREATE, /* only create it should be ((ro==0) ? ( DB_CREATE ) : ( DB_RDONLY ) ) */
-                                0666, NULL, NULL, &p->handle )) ||
+                                0666, NULL, &btreeinfo, &p->handle )) ||
 #if DB_VERSION_MAJOR == 2 && DB_VERSION_MINOR < 6
                 ((p->handle->cursor)(p->handle, NULL, &p->cursor))
 #else
@@ -192,18 +229,30 @@ int open_dbp( dbase * p ) {
 #if defined(DB_LIBRARY_COMPATIBILITY_API) && DB_VERSION_MAJOR > 2
 	if (!(p->handle = (DB *)__db185_open(	p->pfile, 
 						p->mode,
-                                                0666, DB_BTREE, NULL ))) {
+                                                0666, DB_BTREE, &btreeinfo ))) {
 #else
 	if (!(p->handle = (DB *)dbopen(	p->pfile, 
 					p->mode,
-                                        0666, DB_BTREE, NULL ))) {
+                                        0666, DB_BTREE, &btreeinfo ))) {
 #endif /* DB_LIBRARY_COMPATIBILITY_API */
 
 #endif
 
 #else /* Berkeley DB Version > 2 */
-	if (    (db_create(&p->handle, NULL,0)) ||
-        	(p->handle->open(	p->handle,
+	if (db_create(&p->handle, NULL,0))
+		return errno;
+
+	/* set the b-tree comparinson function to the one passed */
+	if( p->bt_compare_fcn_type != NULL ) {
+		p->handle->set_bt_compare(p->handle, ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ?
+                                                        rdfstore_backend_dbms_compare_int : ( p->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ?
+                                                                                                rdfstore_backend_dbms_compare_double : NULL );
+                        };
+
+	p->handle->set_errfile(p->handle,stderr);
+	p->handle->set_errpfx(p->handle,"DBMS BerkelyDB");
+
+	if (    (p->handle->open(	p->handle,
 #if DB_VERSION_MAJOR >= 4 && DB_VERSION_MINOR > 0 && DB_VERSION_PATCH >= 17
 					NULL,
 #endif
@@ -218,11 +267,18 @@ int open_dbp( dbase * p ) {
 		return errno;
 		};
 
+#ifndef BERKELEY_DB_1_OR_2 /* Berkeley DB Version > 2 */
+/*
+        (void)p->handle->set_h_ffactor(p->handle, 1024);
+        (void)p->handle->set_h_nelem(p->handle, (u_int32_t)6000);
+*/
+#endif
+
 	return 0;
         }
 
 
-dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, DBT * v2 ) {
+dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, int bt_compare_fcn_type, DBT * v2 ) {
         dbase * p;
 	char * pfile;
 	char name[ 255 ], *n, *m;
@@ -299,8 +355,25 @@ dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, DBT * v2 ) {
 		if (strcmp(p->name,name)==0) {
 			int oldmode = p->mode;
 
+			/* If the database has the b-tree comparinson function we need - simply
+			 * return it. If we are forking - and this is not the process
+			 * really handling the database - then ignore all this. Otherwise we
+			 * fail with an error
+			 */
+			if ((((p->bt_compare_fcn_type) & bt_compare_fcn_type) == bt_compare_fcn_type )
+#ifdef FORKING
+				|| (!mum_pid) 
+#endif
+				) {
+				return p;
+			} else {
+                		dbms_log(L_ERROR, "Wrong b-tree comparinson function %d on %s - it should be %d", 
+						bt_compare_fcn_type, p->name, p->bt_compare_fcn_type );
+				return NULL;
+				};
+
 			/* If the database already has the perm's we need - simply
-			 * return it. If we are foring - and this is not the process
+			 * return it. If we are forking - and this is not the process
 			 * really handling the database - then ignore all this
 			 */
 			if ((((p->mode) & mode) == mode )
@@ -373,6 +446,7 @@ dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, DBT * v2 ) {
 	p->num_cls = 0;
 	p->close = 0;
 	p->mode = mode;
+	p->bt_compare_fcn_type = bt_compare_fcn_type;
         p->sname = v2->size;
 	p->handle = NULL;
 
@@ -465,7 +539,7 @@ dbase * get_dbp (connection *r, dbms_xsmode_t xsmode, DBT * v2 ) {
 		return p;
 
 err_and_exit:
-	dbms_log(L_ERROR,"open_dbp(1) %s(mode %d) failed: %s",p->pfile,p->mode,strerror(errno));
+	dbms_log(L_ERROR,"open_dbp(1) %s(mode %d) (bt_compare %d) failed: %s",p->pfile,p->mode,p->bt_compare_fcn_type, strerror(errno));
 
 clean_and_exit:
 	p->close = 1; MX;
@@ -488,6 +562,7 @@ void do_init( connection * r) {
 	DBT val;
 	u_long proto;
 	dbms_xsmode_t xsmode;
+	int bt_compare_fcn_type;
 
         memset(&val, 0, sizeof(val));
 
@@ -510,10 +585,18 @@ void do_init( connection * r) {
 		return;
 		};
 
+	bt_compare_fcn_type = ((int) ntohl( ((u_long *)(r->v1.data))[2] ));
+	if (	( bt_compare_fcn_type != 0 ) &&
+		( bt_compare_fcn_type < FLAT_STORE_BT_COMP_INT ) &&
+		( bt_compare_fcn_type > FLAT_STORE_BT_COMP_DATE ) ) {
+		reply_log(r,L_ERROR,"B-tree sorting function not supported");
+		return;
+		};
+
 	/* work out wether we have this dbase already open, 
 	 * and open it if ness. 
 	 */
-	r->dbp = get_dbp( r, xsmode, &(r->v2)); /* returns NULL on error or if it is a child */
+	r->dbp = get_dbp( r, xsmode, bt_compare_fcn_type, &(r->v2)); /* returns NULL on error or if it is a child */
 
 	if (r->dbp == NULL) {
 		if (errno == ENOENT) {
@@ -533,10 +616,11 @@ void do_init( connection * r) {
 #ifdef FORKING
 {
 	/* We -also- need to record some xtra things which are lost acrss the connection. */
-	u_long extra[3];
-	extra[0] = ((u_long *)(r->v1.data))[0];
-	extra[1] = ((u_long *)(r->v1.data))[1];
-	extra[2] = r->address.sin_addr.s_addr;
+	u_long extra[4];
+	extra[0] = ((u_long *)(r->v1.data))[0]; /* proto */
+	extra[1] = ((u_long *)(r->v1.data))[1]; /* mode */
+	extra[2] = ((u_long *)(r->v1.data))[2]; /* bt_compare_fcn_type */
+	extra[3] = r->address.sin_addr.s_addr;
 	r->v1.data = extra;
 	r->v1.size = sizeof(extra);
 	if (handoff_fd(r->dbp->handled_by, r)) 
@@ -565,10 +649,11 @@ void do_pass( connection * mums_r) {
 	u_long proto;
 	dbms_xsmode_t xsmode;
 	DBT val;
+	u_long bt_compare_fcn_type;
 
         memset(&val, 0, sizeof(val));
-	assert(mums_r->v1.size = 3*sizeof(u_long));
-	mums_r->address.sin_addr.s_addr = ((u_long *)(mums_r->v1.data))[2];
+	assert(mums_r->v1.size = 4*sizeof(u_long));
+	mums_r->address.sin_addr.s_addr = ((u_long *)(mums_r->v1.data))[3];
 
 	assert(mum_pid);
 
@@ -597,8 +682,16 @@ void do_pass( connection * mums_r) {
 		reply_log(r,L_ERROR,"Protocol not supported");
 		return;
 		};
+
+	bt_compare_fcn_type = ((int) ntohl( ((u_long *)(mums_r->v1.data))[2] ));
+	if (	( bt_compare_fcn_type != 0 ) &&
+		(	( bt_compare_fcn_type < FLAT_STORE_BT_COMP_INT ) ||
+			( bt_compare_fcn_type > FLAT_STORE_BT_COMP_DATE ) ) ) {
+		reply_log(r,L_ERROR,"B-tree sorting function not supported");
+		return;
+		};
 	
-	r->dbp = get_dbp( r, xsmode, &(mums_r->v2));
+	r->dbp = get_dbp( r, xsmode, bt_compare_fcn_type, &(mums_r->v2));
 
 	if (r->dbp== NULL) {
 		if (errno == ENOENT) {
@@ -1267,9 +1360,9 @@ void do_close( connection * r) {
 	r->close = 1; MX;
 	}
 
-/* Combined from function; from first record when flag==R_FIRST
- * or from the current cursor if flag=R_SET or R_SET_RANGE. If
- * no cursos is yet set; the latter two default to an R_FIRST.
+/* Combined from function; from first record when flag==R_FIRST or DB_FIRST
+ * or from the current cursor if flag=R_CURSOR or DB_SET_RANGE. If
+ * no cursos is yet set; the latter two default to an R_FIRST or DB_FIRST.
  */
 static
 void _from( connection * r, DBT *key, DBT *val, int flag) {
@@ -1289,22 +1382,22 @@ void _from( connection * r, DBT *key, DBT *val, int flag) {
       	err=(r->dbp->handle->seq)( r->dbp->handle, key, val,flag);
 #endif
 
-#ifdef DB_VERSION_MAJOR
+#if DB_VERSION_MAJOR >= 2
         if (err == DB_NOTFOUND)
-                dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
+                dispatch(r,( (flag==DB_FIRST) ? TOKEN_FIRSTKEY : TOKEN_FROM ) | F_NOTFOUND,NULL,NULL);
         else
         if ( err == 0 )
-                dispatch(r,TOKEN_FIRSTKEY | F_FOUND,key,val);
+                dispatch(r,( (flag==DB_FIRST) ? TOKEN_FIRSTKEY : TOKEN_FROM ) | F_FOUND,key,val);
         else {
                 errno=err;
 		reply_log(r,L_ERROR,"first on %s failed: %s",r->dbp->name,strerror(errno));
                 }
 #else
 	if ( err == 1 )
-                dispatch(r,TOKEN_FIRSTKEY | F_NOTFOUND,NULL,NULL);
+                dispatch(r,( (flag==R_FIRST) ? TOKEN_FIRSTKEY : TOKEN_FROM ) | F_NOTFOUND,NULL,NULL);
         else
         if ( err == 0 )
-                dispatch(r,TOKEN_FIRSTKEY | F_FOUND,key,val);
+                dispatch(r,( (flag==R_FIRST) ? TOKEN_FIRSTKEY : TOKEN_FROM ) | F_FOUND,key,val);
         else
 		reply_log(r,L_ERROR,"first on %s failed: %s",r->dbp->name,strerror(errno));
 #endif
@@ -1314,7 +1407,12 @@ void do_first(connection * r) {
         DBT key, val;
 	memset(&key, 0, sizeof(key));
         memset(&val, 0, sizeof(val));
+
+#if DB_VERSION_MAJOR >= 2     
+	_from(r,&key,&val,DB_FIRST);
+#else
 	_from(r,&key,&val,R_FIRST);
+#endif
 }
 
 void do_from(connection *r) {
@@ -1322,12 +1420,10 @@ void do_from(connection *r) {
 	memset(&key, 0, sizeof(key));
         memset(&val, 0, sizeof(val));
 
-	key.data = r->v1.data;
+	key.data = r->v1.data; /* copy the requested closest key */
 	key.size = r->v1.size;
 
-	/* SET_RANGE only works on BTREEs - must use R_SET otherwise.  */
-
-#ifdef DB_VERSION_MAJOR
+#if DB_VERSION_MAJOR >= 2     
 	_from(r,&key,&val,DB_SET_RANGE);
 #else
 	_from(r,&key,&val,R_CURSOR);
@@ -1352,13 +1448,13 @@ void do_next( connection * r) {
 	 */
 	if ( r->dbp->lastfd != r->clientfd ) {
 		r->dbp->lastfd = r->clientfd;
-        	key.data = r->v1.data;
+        	key.data = r->v1.data; /* copy the previous key if any */
         	key.size = r->v1.size;
 
-#ifdef DB_VERSION_MAJOR
-                err=(r->dbp->cursor->c_get)(r->dbp->cursor, &key, &val, R_CURSOR);
+#if DB_VERSION_MAJOR >= 2     
+                err=(r->dbp->cursor->c_get)(r->dbp->cursor, &key, &val, DB_NEXT);
 #else
-        	err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_CURSOR);
+        	err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val, R_NEXT);
 #endif
 
 #ifdef DB_VERSION_MAJOR
@@ -1388,10 +1484,10 @@ void do_next( connection * r) {
 		err = 0;
 
         if (err == 0)
-#ifdef DB_VERSION_MAJOR
-                err=(r->dbp->cursor->c_get)( r->dbp->cursor, &key, &val, R_NEXT);
+#if DB_VERSION_MAJOR >= 2     
+                err=(r->dbp->cursor->c_get)(r->dbp->cursor, &key, &val, DB_NEXT);
 #else 
-		err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val,R_NEXT);
+		err=(r->dbp->handle->seq)( r->dbp->handle, &key, &val, R_NEXT);
 #endif
 
 	trace("%6s %12s %20s: %s %s","NEXT",
@@ -1471,3 +1567,55 @@ void parse_request( connection * r) {
 	return;
 }
 
+/* misc subroutines (copied from ../../backend_bdb_store.c - should be merged) */
+
+/*
+ * The following compare function are used for btree(s) for basic
+ * XML-Schema data types xsd:integer, xsd:double (and will xsd:date)
+ *
+ * They return:
+ *      < 0 if a < b
+ *      = 0 if a = b
+ *      > 0 if a > b
+ */
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_dbms_compare_int(
+        const DBT *a,
+        const DBT *b ) {
+#else
+static int rdfstore_backend_dbms_compare_int(
+        DB *file,
+        const DBT *a,
+        const DBT *b ) {
+#endif
+        long ai, bi;
+
+        memcpy(&ai, a->data, sizeof(long));
+        memcpy(&bi, b->data, sizeof(long));
+
+        return (ai - bi);
+        };
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_dbms_compare_double(
+        const DBT *a,
+        const DBT *b ) {
+#else
+static int rdfstore_backend_dbms_compare_double(
+        DB *file,
+        const DBT *a,
+        const DBT *b ) {
+#endif
+        double ad,bd;
+
+        memcpy(&ad, a->data, sizeof(double));
+        memcpy(&bd, b->data, sizeof(double));
+
+        if (  ad <  bd ) {
+                return -1;
+        } else if (  ad  >  bd) {
+                return 1;
+                };
+
+        return 0;
+        };

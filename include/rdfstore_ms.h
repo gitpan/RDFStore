@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -130,5 +130,13 @@ static const char* rdfstore_ms_uri[RDFSTORE_MS_LAST+1]={
 #define RDFSTORE_MS_DCQ_URI rdfstore_ms_uri[RDFSTORE_MS_DCQ]
 #define RDFSTORE_MS_XSD_URI rdfstore_ms_uri[RDFSTORE_MS_XSD]
 #define RDFSTORE_MS_RDFSTORE_CONTEXTS_URI rdfstore_ms_uri[RDFSTORE_MS_RDFSTORE_CONTEXTS]
+
+#define RDFSTORE_MS_XSD_STRING     "http://www.w3.org/2001/XMLSchema#string"
+#define RDFSTORE_MS_XSD_INTEGER    "http://www.w3.org/2001/XMLSchema#integer"
+#define RDFSTORE_MS_XSD_DECIMAL    "http://www.w3.org/2001/XMLSchema#decimal"
+#define RDFSTORE_MS_XSD_FLOAT      "http://www.w3.org/2001/XMLSchema#float"
+#define RDFSTORE_MS_XSD_DOUBLE     "http://www.w3.org/2001/XMLSchema#double"
+#define RDFSTORE_MS_XSD_DATE       "http://www.w3.org/2001/XMLSchema#date"
+#define RDFSTORE_MS_XSD_DATETIME   "http://www.w3.org/2001/XMLSchema#dateTime"
 
 #endif

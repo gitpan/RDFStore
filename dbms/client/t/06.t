@@ -3,7 +3,7 @@ print "1..8\n";
 use DBMS;
 
 
-tie %a,DBMS,'zoink',&DBMS::XSMODE_CREAT and print "ok\n"
+tie %a,DBMS,'zoink',&DBMS::XSMODE_CREAT,0 and print "ok\n"
 	or die "could not connect $!";
 
 %a=();
@@ -16,7 +16,7 @@ print "ok\n";
 $|=1;
 for $i (1..3) {
 	untie %a;
-	tie %a,DBMS,'zoink',&DBMS::XSMODE_CREAT and print "ok\n"
+	tie %a,DBMS,'zoink',&DBMS::XSMODE_CREAT,0 and print "ok\n"
 		or die "could not connect $!";
 
 	for $i (1..2) {

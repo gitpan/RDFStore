@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -121,6 +121,8 @@ Parse an input RDF file and optionally store the generated triplets into a RDFSt
 		Assume a yes response to all questions asked; this should be used with great caution as this is a free license
 		to confirm permanent chnages to the database like deletion of data.
 
+[-version]	Print RDFStore $VERSION
+
 Main paramter is URL or filename to parser; '-' denotes STDIN.
 
 EOU
@@ -154,6 +156,9 @@ while (defined($ARGV[0])) {
         $ntriples = 1;
     } elsif ($opt eq '-storename') {
         $storename = shift;
+    } elsif ($opt eq '-version') {
+	print $RDFStore::VERSION;
+	exit;
     } elsif ($opt eq '-h') {
         print $Usage;
         exit;
@@ -254,21 +259,23 @@ if($Context) {
 		};
 	};
 
+my $style = ($storename or $serialize =~ /RDF\/XML/i ) ? 'RDFStore::Parser::Styles::RDFStore::Model' :
+				'RDFStore::Parser::Styles::RDFStore::Statement';
 my $p=new ${pt}(
 				ErrorContext => 	3, 
-				Style => 		'RDFStore::Parser::Styles::RDFStore::Model',
+				Style => 		$style,
 				NodeFactory => 		$factory,
 				Source	=> 		(defined $namespace) ?
 								$namespace :
 								($stuff =~ /^-/) ? undef : $stuff,
 				bCreateBags =>		(defined $bagIDs) ? $bagIDs : undef,
 				GenidNumber => $cnt,
-				store	=>	{
+				style_options	=>	{
 							'seevalues' => 	$verbose,
 							'owl:imports' => $owl_imports,
 							'delete' => ($delete) ? 1 : undef,
 							'confirm' => ($yes) ? 1 : undef,
-							'options'		=> 	{	
+							'store_options'		=> 	{	
 										Name	=> 	$output_dir.$storename,
 										Host =>	$dbms_host,
 										Port =>	$dbms_port,
@@ -305,7 +312,7 @@ if(defined $GenidNumberFile) {
 };
 
 $m->serialize(*STDOUT,$serialize)
-	if($serialize);
+	if( !$storename and $serialize );
 
 sub confirm {
 	my ($msg) = @_;

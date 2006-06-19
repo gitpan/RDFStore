@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -43,7 +43,7 @@
  *	problems we had with the IMS user land hangs. But really
  *	treading would be better; and just require a few mutexi-es.
  *
- * $Id: children.c,v 1.19 2004/08/19 18:57:36 areggiori Exp $
+ * $Id: children.c,v 1.20 2006/06/19 10:10:22 areggiori Exp $
  */                                   
 #ifdef FORKING
 

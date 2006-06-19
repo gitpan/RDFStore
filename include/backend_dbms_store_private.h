@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: backend_dbms_store_private.h,v 1.2 2004/08/19 18:57:43 areggiori Exp $
+# $Id: backend_dbms_store_private.h,v 1.4 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 
@@ -129,6 +129,7 @@ typedef struct dbms_store_rec {
 	int	num_dec;
 	int	num_sync;
 	int	num_next;
+	int	num_from;
 	int	num_first;
 	int	num_delete;
 	int	num_clear;

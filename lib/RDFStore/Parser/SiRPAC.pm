@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -107,6 +107,10 @@
 # *		- moved common code to RDFStore::Parser
 # *		- added rdf:datatype support
 # *		- added rdfstore:context support
+# *     version 0.44
+# *		- updated wget() method invocation
+# *		- force rdf:parseType="Literal" if rdf:dataType="http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral"
+# *		- fixed bug in processDescription() when expanding rdf:nodeID on predicate with inline typed node
 # *
 
 package RDFStore::Parser::SiRPAC;
@@ -123,7 +127,7 @@ package RDFStore::Parser::SiRPAC;
 BEGIN
 {
 	require XML::Parser::Expat;
-    	$VERSION = '0.43';
+    	$VERSION = '0.44';
     	croak "XML::Parser::Expat.pm version 2 or higher is needed"
 		unless $XML::Parser::Expat::VERSION =~ /^2\./;
 }
@@ -388,15 +392,15 @@ sub parsefile {
                 $file_uri= URI->new(((defined $scheme) ? $scheme : '' ).$file);
 		if (	(defined $file_uri) && (defined $file_uri->scheme)	&&
 			($file_uri->scheme ne 'file') ) {
-  			my $wget_handle = $class->wget($file_uri);
-			if(defined $wget_handle) {
+  			my $content = $class->wget($file_uri);
+			if(defined $content) {
 				if (wantarray) { 	
 					eval {
-						@ret = $class->parse($wget_handle, $file_uri,@_);
+						@ret = $class->parsestring($content, $file_uri,@_);
     					};
 				} else {
 					eval {
-						$ret = $class->parse($wget_handle, $file_uri,@_);
+						$ret = $class->parsestring($content, $file_uri,@_);
     					};
 				};
     				my $err = $@;
@@ -1197,8 +1201,13 @@ sub processDescription {
           					$ele->{sID} = 'rdf:nodeID:'.$nodeID;	
 						};
 				} else {
-					$ele->{sID} = newReificationID($expat)
-          					if(not(((defined $ele->{sID}) && ($ele->{sID} ne ''))));
+					my $about = getAttributeValue($expat, $ele->{attlist},$RDFStore::Parser::SiRPAC::RDFMS_about);
+					if( $about =~ /^rdf:nodeID:/ ) {
+						$ele->{sID} = $about;
+					} else {
+						$ele->{sID} = newReificationID($expat)
+          						if(not(((defined $ele->{sID}) && ($ele->{sID} ne ''))));
+						};
 					};
           			if (not(((defined $sAbout) && ($sAbout ne '')))) {
             				if ((defined $sID) && ($sID ne '')) {
@@ -2348,7 +2357,8 @@ package RDFStore::Parser::SiRPAC::DataElement;
 		delete $self->{sNamespace}; # we do not need it
 		delete $self->{attlist}; # we do not need it
 
-		$self->{'parse_type'} = ($parsetype) ? 1 : 0; #Literal or Resource
+		$self->{'parse_type'} = (	$parsetype or 
+						$datatype eq 'http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral' ) ? 1 : 0; #Literal or Resource
 		$self->{tag} = "[DATA: " . $text . "]";
 		$self->{sContent} = $text; #instanceOf Data :-)
 		bless $self,$pkg;
@@ -2393,10 +2403,10 @@ RDFStore::Parser::SiRPAC - This module implements a streaming RDF Parser as a di
                 ErrorContext 	=> 2,
 		Style           => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory     => new RDFStore::NodeFactory(),
-                store   =>      {
+                style_options   =>      {
                                         persistent      =>      1,
                                         seevalues       =>      1,
-                                        options         =>      { Name => '/tmp/test' }
+                                        store_options         =>      { Name => '/tmp/test' }
                                 }
         );
 	my $rdfstore_model = $pstore->parsefile('http://www.gils.net/bsr-gils.rdfs');

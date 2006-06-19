@@ -1,6 +1,6 @@
 /*
   *
-  *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+  *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
   *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
   *
   * NOTICE
@@ -11,7 +11,7 @@
   *
   *     http://rdfstore.sourceforge.net/LICENSE
   *
-  * $Id: rdfstore_compress.c,v 1.10 2004/08/19 18:57:13 areggiori Exp $
+  * $Id: rdfstore_compress.c,v 1.12 2006/06/19 10:10:21 areggiori Exp $
   */
 
 #include <sys/types.h>
@@ -52,6 +52,27 @@ static void _bcopy(unsigned int srclen,unsigned char* src, unsigned int * dstlen
 	* dstlen = srclen;
 };
 
+#ifdef DEBUG_BDB_PAGESIZES
+/* Fake compression method which will pad each record up to a specific
+ * multiple of 2; such as 1024 - as to hide small size changes for
+ * the BDB above.
+ */
+#define LOGSIZE (10)	/* 1024 */
+static void _enc(unsigned int srclen,unsigned char* src, unsigned int * dstlen, unsigned char * dst)
+{
+	*(int *)dst = srclen;
+	bcopy(src,dst+4,srclen);
+	srclen = ((srclen >> LOGSIZE) + 1) << LOGSIZE;
+	* dstlen = srclen;
+};
+
+static void _dec(unsigned int srclen,unsigned char* src, unsigned int * dstlen, unsigned char * dst)
+{
+	* dstlen = *(int *)src;
+	bcopy(src,dst+4,srclen);
+};
+#endif
+
 int rdfstore_compress_init(
 	rdfstore_compression_types type, 
 	void(**func_decode)(unsigned int,unsigned char*, unsigned int *, unsigned char *),
@@ -67,6 +88,12 @@ int rdfstore_compress_init(
 	}
 
 	switch(type) {
+#ifdef DEBUG_BDB_PAGESIZES
+	case 999:
+		*func_encode = &_enc;
+		*func_decode = &_dec;
+		break;
+#endif
 	case RDFSTORE_COMPRESSION_TYPE_NONE:
 		*func_encode = &_bcopy;
 		*func_decode = &_bcopy;

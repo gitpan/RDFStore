@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -12,7 +12,7 @@
  *
  * Simple debugging malloc, when/if needed 
  *
- * $Id: mymalloc.c,v 1.10 2004/08/19 18:57:37 areggiori Exp $
+ * $Id: mymalloc.c,v 1.11 2006/06/19 10:10:22 areggiori Exp $
  */
 #include "dbms.h"
 #include "dbms_compat.h"

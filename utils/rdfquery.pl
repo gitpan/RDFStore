@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -70,61 +70,73 @@ use DBI;
 
 my $Usage =<<EOU;
 Usage is:
-    $0 [-h] [-storename <IDENTIFIER>] [-serialize <syntax>] [-query <querystring>] <querystring>
+
+    $0 <querystring_or_filename> [-storename <IDENTIFIER>] [-serialize <syntax>] [-h]
 
 Query an existing RDFStore database.
 
--h	Print this message
+<querystring_or_filename>
 
-[-query <querystring>] or last argument of command line
-		A RDQL query (see http://www.w3.org/Submission/2004/SUBM-RDQL-20040109/ for syntax)
+		A SPARQL query string (see syntax at http://www.w3.org/TR/rdf-sparql-query/) or a file containing the actual query
 
-		E.g.
+		Example RSS-1.0 query
 
+		PREFIX   rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+		PREFIX   rss:   <http://purl.org/rss/1.0/>
 		SELECT
-			?title, ?link
+			?title ?link
 		FROM
 			<http://xmlhack.com/rss10.php>
 		WHERE
-			(?item, <rdf:type>, <rss:item>),
-			(?item, <rss::title>, ?title),
-			(?item, <rss::link>, ?link)
-		USING
-			rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>,
-			rss for <http://purl.org/rss/1.0/>
+			( ?item rdf:type rss:item )
+			( ?item rss::title ?title )
+			( ?item rss::link ?link )
 
 [-storename <IDENTIFIER>]
-		RDFStore database name IDENTIFIER is like rdfstore://[HOSTNAME[:PORT]]/PATH/DBDIRNAME
+	If not specified into the FROM clause part of the query, this option allows to specify a 
+	database IDENTIFIER like rdfstore://[HOSTNAME[:PORT]]/PATH/DBDIRNAME to query
 
-                        E.g. URLs
-                                        rdfstore://mysite.foo.com:1234/this/is/my/rd/store/database
-                                        rdfstore:///root/this/is/my/rd/store/database
+        E.g. URLs
+        		rdfstore://mysite.foo.com:1234/this/is/my/rd/store/database
+                        rdfstore:///root/this/is/my/rd/store/database
 
-[-v]	Be verbose
+[-serialize rdf-for-xml | dawg-xml ]
+	Result Forms - by default SELECT generates RDF/XML tabular format (http://www.w3.org/2001/sw/DataAccess/tests/result-set#) while 
+	DESCRIBE or CONSTRUCT queries generate canonical RDF/XML output.
+	
+	Alternatively this option allows you to get two simple XML output formats
+		* dawg-xml (http://www.w3.org/2001/sw/DataAccess/rf1/) syntax
+		* rdf-for-xml (http://jena.hpl.hp.com/~afs/RDF-XML.html)
 
-[-serialize RDF/XML | NTriples | rdfqr-results | rdf-for-xml ]
-                generate results as RDF/XML, NTriples, RDF Query and Rules (http://www.w3.org/2003/03/rdfqr-tests/recording-query-results.html) or RDF-for-XML (http://jena.hpl.hp.com/~afs/RDF-XML.html) syntax
+[-smart]
+	Use simple rdfs:subClassOf rdfs:subPropertyOf and owl:sameAs inferencing
 
-Main paramter is the query.
+[-comment <STRING>]
+	Comment to add to the XML output
+
+[-metadata <filename_or_URI>]
+	Additional metadata link for <head/> elemenet into DAWG-XML format
+
+[-h]
+	Print this message
 
 EOU
 
 # Process options
 print $Usage and exit if ($#ARGV<0);
 
-my ($verbose,$query,$storename,$input_dir,$dbms_host,$dbms_port,$serialize);
-my @query;
+my ($verbose,$metadata, $comment,$query,$storename,$input_dir,$dbms_host,$dbms_port,$serialize,$smart);
+$smart=0;
 while (defined($ARGV[0])) {
     my $opt = shift;
 
     if ($opt eq '-storename') {
         $storename = shift;
-    } elsif ($opt eq '-query') {
-	print STDERR "WARNING! -query option is deprecated - input query is defined to be last passed argument now\n";
-	$query=shift;
     } elsif ($opt eq '-h') {
         print $Usage;
         exit;
+    } elsif ($opt eq '-smart') {
+	$smart=1;
     } elsif ($opt eq '-v') {
 	$verbose=1;
     } elsif ($opt eq '-input_dir') {
@@ -145,40 +157,58 @@ while (defined($ARGV[0])) {
         $serialize = shift;
 	$serialize = 'RDF/XML'
 		unless($serialize);
+    } elsif ($opt eq '-comment') {
+        $comment = shift;
+    } elsif ($opt eq '-metadata') {
+        $metadata = shift;
     } else {
 	$query=$opt;
     	};
 };
 
 my $factory = new RDFStore::NodeFactory();
-my $dbh = DBI->connect("DBI:RDFStore:database=$input_dir$storename;host=$dbms_host;port=$dbms_port", "pincopallino", 0, { nodeFactory => $factory, asRDF => { syntax => $serialize } } )
+my %results_options = (
+	'syntax' => $serialize
+	);
+$results_options{'metadata'} = $metadata
+	if($metadata); #check if file or URI perhaps?
+
+$results_options{'comment'} = $comment
+	if($comment);
+
+my $dbh = DBI->connect("DBI:RDFStore:database=$input_dir$storename;host=$dbms_host;port=$dbms_port", "pincopallino", 0,
+						{	nodeFactory => $factory,
+							results => \%results_options,
+							smarter => $smart } )
 	or die "Oh dear, can not connect to rdfstore: $!";
 
+if( -e $query && -r _ ) {
+	open(QUERY, $query);
+	$query='';
+	while(<QUERY>) {
+		$query.=$_;
+		};
+	close(QUERY);
+	};
+
 my $sth;
+my $rdfresults;
 eval {
         $sth=$dbh->prepare($query);
 	$sth->execute();
-};
+	};
 my $err = $@;
 croak $err
 	if $err;
 
-my $rows=0;
-while (my $row = $sth->fetchrow_hashref()) {
-	unless($serialize) {
-		map {
-			print "$_ = ",$row->{$_}->toString,"\n";
-		} keys %{$row};
-		print "\n";
-		$rows++;
-        	};
-        };
-
-unless($serialize) {
-	die "No results\n"
-		unless($rows>0);
-
-	print "Matched: ".$rows." rows\n";
+if( $sth->func('getQueryStatement')->getQueryType eq 'SELECT' and $serialize !~ /n-triples/i ) {
+	while (my $xml = $sth->func( $serialize ? $serialize : 'dawg-results', 'fetchrow_XML' )) {
+		print $xml;
+       		};
+} else {
+	while (my $rdf = $sth->func( $serialize ? $serialize : 'RDF/XML', 'fetchsubgraph_serialize' )) {
+		print $rdf;
+       		};
 	};
 
 $sth->finish();

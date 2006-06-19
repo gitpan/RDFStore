@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore_flat_store.c,v 1.22 2004/08/19 18:57:13 areggiori Exp $
+# $Id: rdfstore_flat_store.c,v 1.25 2006/06/19 10:10:21 areggiori Exp $
 */
 #include "dbms.h"
 #include "dbms_compat.h"
@@ -99,7 +99,10 @@ rdfstore_flat_store_set_error(FLATDB * me, char *msg, rdfstore_flat_store_error_
 	if ( me == NULL )
 		return;
 
-	(*(me->store->set_error)) (me->instance, msg, erx);
+	if (me && me->store)
+		(*(me->store->set_error)) (me->instance, msg, erx);
+	else
+		perror(msg);
 	};
 
 char *
@@ -145,7 +148,8 @@ rdfstore_flat_store_open(
 			 void *(*_my_malloc) (size_t size),
 			 void (*_my_free) (void *),
 			 void (*_my_report) (dbms_cause_t cause, int count),
-			 void (*_my_error) (char *err, int erx) ) {
+			 void (*_my_error) (char *err, int erx),
+			 int bt_compare_fcn_type ) {
 	FLATDB         *me;
 	rdfstore_flat_store_error_t err;
 
@@ -189,7 +193,8 @@ rdfstore_flat_store_open(
 	err = (*(me->store->open)) (
 	 			remote, ro, (void **) &(me->instance), 
 				dir, name, local_hash_flags, host, port,
-			       _my_malloc, _my_free, _my_report, _my_error
+			       _my_malloc, _my_free, _my_report, _my_error,
+				bt_compare_fcn_type
 	);
 	if (err) {
 		(*_my_free) (me);
@@ -311,6 +316,18 @@ rdfstore_flat_store_clear(
 	};
 
 rdfstore_flat_store_error_t
+rdfstore_flat_store_from(
+			  FLATDB * me,
+			  DBT closest_key,
+			  DBT * key ) {
+	
+	if ( me == NULL )
+                return FLAT_STORE_E_UNDEF;
+
+	return (*(me->store->from)) (me->instance, closest_key, key);
+	};
+
+rdfstore_flat_store_error_t
 rdfstore_flat_store_first(
 			  FLATDB * me,
 			  DBT * key ) {
@@ -377,3 +394,4 @@ rdfstore_flat_store_isremote(
 
 	return (*(me->store->isremote)) (me->instance);
 	};
+

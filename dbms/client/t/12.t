@@ -32,7 +32,7 @@ print "ok 1\n";
 
 my %c;
 
-ok 2, my $db5 = tie %c,"DBMS",'test3',&DBMS::XSMODE_CREAT;
+ok 2, my $db5 = tie %c,"DBMS",'test3',&DBMS::XSMODE_CREAT,0;
 
 #inc() method
 eval {

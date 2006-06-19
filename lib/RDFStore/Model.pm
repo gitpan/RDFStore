@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -63,6 +63,9 @@
 # *		- added unite(), subtract(), intersect(), complement() and exor() methods
 # *		- re-added RDFStore::Resource inheritance
 # *		- added getParser(), getReader(), getSerializer() and getWriter() methods
+# *     version 0.44
+# *		- updated search() method call to use new XS code interface (hash ref)
+# *		- added ifModifiedSince() method
 # *
 
 package RDFStore::Model;
@@ -70,7 +73,7 @@ package RDFStore::Model;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.43';
+$VERSION = '0.44';
 
 use Carp;
 
@@ -151,12 +154,14 @@ sub new {
 		push @params,undef;
 		};
 
-	$self->{rdfstore} = new RDFStore( @params );
+	$self->{'rdfstore'} = new RDFStore( @params );
 
         die "Cannot connect rdfstore"
 		unless(	(defined $self->{rdfstore}) &&
 			(ref($self->{rdfstore})) &&
 			($self->{rdfstore}->isa("RDFStore")) );
+
+	$self->{'rdfstore_params'} = \%params;
 
         bless $self,$pkg;
 
@@ -265,6 +270,15 @@ sub isRemote {
 		return $_[0]->{Shared}->isRemote;
 		};
         $_[0]->{rdfstore}->is_remote;
+	};
+
+sub ifModifiedSince {
+	if(	(exists $_[0]->{Shared}) &&
+		(defined $_[0]->{Shared}) ) {
+		return $_[0]->{Shared}->ifModifiedSince( $_[1] );
+		};
+
+	&RDFStore::if_modified_since( $_[0]->{'rdfstore_params'}->{'Name'}, $_[1] );
 	};
 
 # return an instance of RDFStore::Model::Iterator
@@ -536,39 +550,44 @@ sub find {
 			};
 		};
 
-	my $search_type=0; #default triple-pattern search
-	#                       0 1 2 3 4 5 6 7 8 9 0 1 2 3
-        #                       s s p p o o c c l l d d w w
-        my @operators_and_nums=(0,0,0,0,0,0,0,0,0,0,0,0,0,0); #all non-words operators are set to 0=OR - will need 1=AND for real RDQL query
+	#all non-words operators are set to 0=OR - will need 1=AND for real RDQL query
+	my $query = {	'search_type' => 0, #default triple-pattern search
+			"s" => [],
+                        "s_op" => "or",
+                        "p" => [],
+                        "p_op" => "or",
+                        "o" => [],
+                        "o_op" => "or",
+                        "c" => [],
+                        "c_op" => "or",
+                        "xml:lang" => [],
+                        "xml:lang_op" => "or",
+                        "rdf:datatype" => [],
+                        "rdf:datatype_op" => "or"
+                        };
 
 	my @qq=();
 	if($subject) {
-		$operators_and_nums[1]++;
-		push @qq, $subject;
+		push @{$query->{'s'}}, $subject;
 		};
 	if($predicate) {
-		$operators_and_nums[3]++;
-		push @qq, $predicate;
+		push @{$query->{'p'}}, $predicate;
 		};
 	if($object) {
-		$operators_and_nums[5]++;
-		push @qq, $object;
-
+		push @{$query->{'o'}}, $object;
 		#still need to add xml:lang and rdf:datatype for passed object here...
 		};
 	if($context) {
-		$operators_and_nums[7]++;
-		push @qq, $context;
+		push @{$query->{'c'}}, $context;
 		};
-	$operators_and_nums[12] = (	(defined $words_operator) &&
-					($words_operator =~ /(and|&|1)/i) ) ? 1 :
+	$query->{'words_op'} = (	(defined $words_operator) &&
+					($words_operator =~ /(and|&|1)/i) ) ? 'and' :
 					(       (defined $words_operator) &&
-						($words_operator =~ /(not|~|2)/i) ) ? 2 : 0;
-	map {
-		$operators_and_nums[13]++;
-		push @qq, $_;
-		} @words;
-	my $iterator = $class->{rdfstore}->search( $search_type, @operators_and_nums, @qq );
+						($words_operator =~ /(not|~|2)/i) ) ? 'not' : 'or' ;
+
+	push @{$query->{'words'}}, @words;
+
+	my $iterator = $class->{rdfstore}->search( $query );
 
 	if ( exists $class->{sharing_query_iterator}) {
                 # intersect/diff the two iterators
@@ -923,7 +942,7 @@ sub getReader {
 					NodeFactory => $class->getNodeFactory,
 					Source  => ($class->getSourceURI ) ? $class->getSourceURI : undef,
 					GenidNumber => $class->{'GenidNumber'},
-					'store' => { 'options' => { 'sourceModel' => $class } } );
+					'style_options' => { 'store_options' => { 'sourceModel' => $class } } );
 	} elsif( $syntax =~ m/N-Triples/i) {
 		$parser = new RDFStore::Parser::NTriples(
 					ErrorContext => 3,
@@ -931,7 +950,7 @@ sub getReader {
 					NodeFactory => $class->getNodeFactory,
 					Source  => ($class->getSourceURI ) ? $class->getSourceURI : undef,
 					GenidNumber => $class->{'GenidNumber'},
-					'store' => { 'options' => { 'sourceModel' => $class } } );
+					'style_options' => { 'store_options' => { 'sourceModel' => $class } } );
 	} else {
 		croak "Unknown RDF syntax '$syntax'";
 		};

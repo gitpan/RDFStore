@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore_compress.h,v 1.6 2004/08/19 18:57:43 areggiori Exp $
+# $Id: rdfstore_compress.h,v 1.7 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 

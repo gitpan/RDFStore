@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 
- $Id: rdfstore_bits.c,v 1.15 2004/08/19 18:57:12 areggiori Exp $
+ $Id: rdfstore_bits.c,v 1.16 2006/06/19 10:10:21 areggiori Exp $
 */
 
 #include <sys/types.h>

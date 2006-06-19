@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -78,11 +78,16 @@ struct  hostent {
 struct hostent * gethostbyname(const char *name);
 #endif
 
+/* not using the following but euristics into main Makefile.PL to guess out paths for db.h */
+#if 0
 #ifdef DB1_INCLUDE
 #	include <db1/db.h>
 #else
 #ifdef DB2_INCLUDE
 #	include <db2/db.h>
+#else
+#ifdef DB3_INCLUDE
+#       include <db3/db.h>
 #else
 #ifdef DB4_INCLUDE
 #	include <db4/db.h>
@@ -90,12 +95,20 @@ struct hostent * gethostbyname(const char *name);
 #ifdef COMPAT185
 #	include <db_185.h>
 #else
-#	include <db.h>
+#	include "db.h"
 #endif
 #endif
 #endif
 #endif
+#endif
+#endif
+/* end not used */
 
+#ifdef COMPAT185
+#	include "db_185.h"
+#else
+#	include "db.h"
+#endif
 
 #ifdef DB_VERSION_MAJOR
 #	if DB_VERSION_MAJOR == 2

@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -22,6 +22,8 @@
 # *		- added statements reification support via createReifiedStatement() - see also RDFStore::Statement(3)
 # *		- updated accordingly to new RDFStore API
 # *		- added createNTriple() method
+# *     version 0.42
+# *		- fixed bNodes identifers generation
 # *
 
 package RDFStore::NodeFactory;
@@ -29,7 +31,7 @@ package RDFStore::NodeFactory;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.41';
+$VERSION = '0.42';
 
 use Carp;
 use RDFStore::Literal;
@@ -73,7 +75,7 @@ sub createAnonymousResource {
 	} else {
 		# try to generate system/run wide unique ID i.e. 'S' + unpack("H*", rand()) + 'P' + $$ + 'T' + time() + 'N' + GenidNumber
 		return new RDFStore::Resource(
-			'rdf:nodeID:genidrdfstore' .
+			'rdfnodeIDgenidrdfstore' .
 			'S'.$_[0]->{'rand_seed'} .
 			'P'. $$.
 			'T'. $_[0]->{'timestamp'} .
@@ -113,7 +115,7 @@ sub createReifiedStatement {
 sub createUniqueResource {
 	# try to generate system/run wide unique ID i.e. 'S' + unpack("H*", rand()) + 'P' + $$ + 'T' + time() + 'N' + IdNumber
 	return new RDFStore::Resource(
-			'rdf:resource:rdfstore' .
+			'rdfresourcerdfstore' .
 			'S'.$_[0]->{'rand_seed'} .
 			'P'. $$.
 			'T'. $_[0]->{'timestamp'} .

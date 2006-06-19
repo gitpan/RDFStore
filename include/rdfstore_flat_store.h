@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore_flat_store.h,v 1.6 2004/08/19 18:57:43 areggiori Exp $
+# $Id: rdfstore_flat_store.h,v 1.8 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 
@@ -88,6 +88,10 @@ typedef int rdfstore_flat_store_error_t;
 #define FLAT_STORE_E_DBMS             2008
 #define FLAT_STORE_E_CANNOTOPEN       2009
 #define FLAT_STORE_E_BUG              2010
+
+#define FLAT_STORE_BT_COMP_INT	      7000
+#define FLAT_STORE_BT_COMP_DOUBLE     7001
+#define FLAT_STORE_BT_COMP_DATE	      7002 /* not implemented yet */
 
 #ifdef RDFSTORE_FLAT_STORE_DEBUG
 void rdfstore_flat_store_reset_debuginfo( FLATDB * me );
@@ -114,7 +118,8 @@ rdfstore_flat_store_open (
         void *(*_my_malloc)( size_t size),
         void(*_my_free)(void *),
         void(*_my_report)(dbms_cause_t cause, int count),
-        void(*_my_error)(char * err, int erx)
+        void(*_my_error)(char * err, int erx),
+	int bt_compare_fcn_type
 	);
 
 rdfstore_flat_store_error_t
@@ -176,6 +181,13 @@ rdfstore_flat_store_clear (
 	);
 
 rdfstore_flat_store_error_t
+rdfstore_flat_store_from(
+	FLATDB * me,
+	DBT closest_key,
+	DBT * key
+	);
+
+rdfstore_flat_store_error_t
 rdfstore_flat_store_first (
 	FLATDB * me,
 	DBT    * first_key
@@ -207,6 +219,7 @@ int
 rdfstore_flat_store_isremote(
 	FLATDB * me
 );
+
 #ifndef MIN
 #define MIN(a,b) ( (a)>(b) ? (b) : (a) )
 #endif

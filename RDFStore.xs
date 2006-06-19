@@ -1,6 +1,6 @@
 /*
   *
-  *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+  *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
   *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
   *
   * NOTICE
@@ -89,7 +89,10 @@ typedef dbms * DBMS;
 /* this version interacts with $! in perl.. */
 void
 myerror(char * erm, int erx ) {    
-        SV* sv = perl_get_sv("RDFSTORE_ERROR",TRUE);
+#ifdef dTHX
+	dTHX;
+#endif
+        SV* sv = perl_get_sv("RDFStore::ERROR",TRUE);
         SV* sv2 = perl_get_sv("!",TRUE);
 
         sv_setiv(sv, (IV) erx);
@@ -99,7 +102,7 @@ myerror(char * erm, int erx ) {
         sv_setiv(sv2, (IV) erx);
         sv_setpv(sv2, erm );
         SvIOK_on(sv2);
-#if 1
+#if 0
         fprintf(stderr,"RDFStore: ERROR %s\n",erm);
 #endif
 	}
@@ -107,6 +110,9 @@ myerror(char * erm, int erx ) {
 /* this version interacts with $! in perl.. */
 void
 set_dbms_error(char * erm, int erx ) {
+#ifdef dTHX
+	dTHX;
+#endif
 	SV* sv = perl_get_sv("DBMS::ERROR",TRUE); 
 	SV* sv2 = perl_get_sv("!",TRUE); 
 
@@ -164,6 +170,9 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
+#ifdef dTHX
+  dTHX;
+#endif
   AV *isa = perl_get_av("RDFStore::RDFNode::ISA",1);
   av_push(isa,newSVpv("RDFStore::Digest::Digestable",0)); 
 };
@@ -249,6 +258,9 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
+#ifdef dTHX
+  dTHX;
+#endif
   AV *isa = perl_get_av("RDFStore::Resource::ISA",1);
   av_push(isa,newSVpv("RDFStore::RDFNode",0)); 
 };
@@ -391,6 +403,9 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
+#ifdef dTHX
+  dTHX;
+#endif
   AV *isa = perl_get_av("RDFStore::Literal::ISA",1);
   av_push(isa,newSVpv("RDFStore::RDFNode",0)); 
 };
@@ -413,7 +428,7 @@ RDFStore_Literal_new ( package, content=NULL, parseType=0, lang=NULL, dataType=N
                         char *sclass = SvPV(package, my_na);
 
 			/* strlen() is not UTF8 safe - Perl does this with SvLEN() but must SV* ... */
-			mm = rdfstore_literal_new( content, strlen(content), parseType, lang, dataType );
+			mm = rdfstore_literal_new( content, ( content != NULL ) ? strlen(content) : 0 , parseType, lang, dataType );
 
 			if ( mm == NULL ) {
 				XSRETURN_UNDEF;
@@ -484,6 +499,9 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
+#ifdef dTHX
+  dTHX;
+#endif
   AV *isa = perl_get_av("RDFStore::Statement::ISA",1);
   av_push(isa,newSVpv("RDFStore::Resource",0)); 
 };
@@ -717,6 +735,21 @@ RDFStore_Statement_DESTROY( me )
 MODULE = RDFStore	PACKAGE = RDFStore	PREFIX = RDFStore_
 
 PROTOTYPES: DISABLE
+
+int
+RDFStore_if_modified_since ( name=NULL, since )
+	char *	name
+	char *	since
+	
+	PREINIT:
+		int status=0;
+
+	CODE:
+		status=rdfstore_if_modified_since( name, since, NULL,NULL,NULL,&myerror );
+
+                RETVAL = (status) ? 0 : 1;
+        OUTPUT:
+          	RETVAL
 
 void
 RDFStore_new ( package, directory="", flags=0, freetext=0, sync=0, remote=0, host=DBMS_HOST,port=DBMS_PORT )
@@ -1183,23 +1216,9 @@ RDFStore_elements ( me )
 			};
 	
 void
-RDFStore_search ( me, search_type=0, subjects_operator=0, num_subjects=0, predicates_operator=0, num_predicates=0, objects_operator=0, num_objects=0, contexts_operator=0, num_contexts=0, langs_operator=0, num_langs=0, dts_operator=0, num_dts=0, words_operator=0, num_words=0, ... )
+RDFStore_search( me, rpn=NULL )
 	SV*		me
-	int		search_type
-	int		subjects_operator
-	int		num_subjects
-	int		predicates_operator
-	int		num_predicates
-	int		objects_operator
-	int		num_objects
-	int		contexts_operator
-	int		num_contexts
-	int		langs_operator
-	int		num_langs
-	int		dts_operator
-	int		num_dts
-	int		words_operator
-	int		num_words
+	SV*		rpn
 
 	PREINIT:
 		RDFStore mm = (RDFStore)SvIV(SvRV(me));
@@ -1208,118 +1227,254 @@ RDFStore_search ( me, search_type=0, subjects_operator=0, num_subjects=0, predic
 		STRLEN			len;
 		RDFStore_Iterator	cc;
 		SV * iterator;
+		SV ** hval=NULL;
+		AV * list=NULL;
+		SV * node=NULL;
+		int search_type=0;
 		
 	PPCODE:
+		if( ! SvROK(rpn) )
+			XSRETURN_UNDEF;
+
 		tp = rdfstore_triple_pattern_new();
 
 		if ( tp == NULL ) {
 			XSRETURN_UNDEF;
 			};
 
-		if ( num_subjects > 0 ) {
-			for(i=0;i<num_subjects;i++) {
-				if (	( ST(i+16) != NULL ) &&
-					( ST(i+16) != &PL_sv_undef ) &&
-					( SvTRUE(ST(i+16)) ) ) {
-                        			if ( ! ( ( SvROK(ST(i+16)) ) &&
-                                 			 ( sv_isa( ST(i+16), "RDFStore::Resource") ) ) ) {     
-                                			croak("search: Invalid subject\n");
+		hval = hv_fetch( (HV*) SvRV(rpn), "s", 1, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					( SvTRUE(node) ) ) {
+                        			if ( ! ( ( SvROK(node) ) &&
+                                 			 ( sv_isa( node, "RDFStore::Resource") ) ) ) {     
+                                			croak("search: Invalid subject at pos %d\n",i);
 							rdfstore_triple_pattern_free(tp);
 							XSRETURN_UNDEF;
 						} else {
-							rdfstore_triple_pattern_add_subject( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(ST(i+16))) ) );
+							rdfstore_triple_pattern_add_subject( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(node)) ) );
+                                			};
+                        			};
+				};
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "p", 1, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					( SvTRUE(node) ) ) {
+                        			if ( ! ( ( SvROK(node) ) &&
+                                 			 ( sv_isa( node, "RDFStore::Resource") ) ) ) {     
+                                			croak("search: Invalid predicate at pos %d\n",i);
+							rdfstore_triple_pattern_free(tp);
+							XSRETURN_UNDEF;
+						} else {
+							rdfstore_triple_pattern_add_predicate( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(node)) ) );
+                                			};
+                        			};
+				};
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "o", 1, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					( SvTRUE(node) ) ) {
+                        			if ( ! ( ( SvROK(node) ) &&
+                                 			 ( ( sv_isa( node, "RDFStore::Literal") ) ||
+							   ( sv_isa( node, "RDFStore::Resource") ) ) ) ) {     
+                                			croak("search: Invalid object at pos %d\n",i);
+							rdfstore_triple_pattern_free(tp);
+							XSRETURN_UNDEF;
+						} else {
+							rdfstore_triple_pattern_add_object( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(node)) ) );
+                                			};
+                        			};
+				};
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "c", 1, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					( SvTRUE(node) ) ) {
+                        			if ( ! ( ( SvROK(node) ) &&
+                                 			 ( sv_isa( node, "RDFStore::Resource") ) ) ) {     
+                                			croak("search: Invalid context at pos %d\n",i);
+							rdfstore_triple_pattern_free(tp);
+							XSRETURN_UNDEF;
+						} else {
+							rdfstore_triple_pattern_add_context( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(node)) ) );
                                 			};
                         			};
 				};
 			};
 
-		if ( num_predicates > 0 ) {
-			for(i=0;i<num_predicates;i++) {
-				if (	( ST(i+16+num_subjects) != NULL ) &&
-					( ST(i+16+num_subjects) != &PL_sv_undef ) &&
-					( SvTRUE(ST(i+16+num_subjects)) ) ) {
-                        			if ( ! ( ( SvROK(ST(i+16+num_subjects)) ) &&
-                                 			 ( sv_isa( ST(i+16+num_subjects), "RDFStore::Resource") ) ) ) {     
-                                			croak("search: Invalid predicate\n");
-							rdfstore_triple_pattern_free(tp);
-							XSRETURN_UNDEF;
-						} else {
-							rdfstore_triple_pattern_add_predicate( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(ST(i+16+num_subjects))) ) );
-                                			};
-                        			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "xml:lang", 8, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					SvTRUE(node) &&
+					SvPOK(node) &&
+					SvCUR(node) ) {
+					rdfstore_triple_pattern_add_lang( tp, (unsigned char *)(SvPV(node,len)) );
+                        		};
 				};
 			};
-
-		if ( num_objects > 0 ) {
-			for(i=0;i<num_objects;i++) {
-				if (	( ST(i+16+num_subjects+num_predicates) != NULL ) &&
-					( ST(i+16+num_subjects+num_predicates) != &PL_sv_undef ) &&
-					( SvTRUE(ST(i+16+num_subjects+num_predicates)) ) ) {
-                        			if ( ! ( ( SvROK(ST(i+16+num_subjects+num_predicates)) ) &&
-                                 			 ( ( sv_isa( ST(i+16+num_subjects+num_predicates), "RDFStore::Literal") ) ||
-                                 			   ( sv_isa( ST(i+16+num_subjects+num_predicates), "RDFStore::Resource") ) ) ) ) {     
-                                			croak("search: Invalid object\n");
-							rdfstore_triple_pattern_free(tp);
-							XSRETURN_UNDEF;
-						} else {
-							rdfstore_triple_pattern_add_object( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(ST(i+16+num_subjects+num_predicates))) ) );
-                                			};
-                        			};
-				};
-			};
-
-		if ( num_contexts > 0 ) {
-			for(i=0;i<num_contexts;i++) {
-				if (	( ST(i+16+num_subjects+num_predicates+num_objects) != NULL ) &&
-					( ST(i+16+num_subjects+num_predicates+num_objects) != &PL_sv_undef ) &&
-					( SvTRUE(ST(i+16+num_subjects+num_predicates+num_objects)) ) ) {
-                        			if ( ! ( ( SvROK(ST(i+16+num_subjects+num_predicates+num_objects)) ) &&
-                                 			 ( sv_isa( ST(i+16+num_subjects+num_predicates+num_objects), "RDFStore::Resource") ) ) ) {     
-                                			croak("search: Invalid context\n");
-							rdfstore_triple_pattern_free(tp);
-							XSRETURN_UNDEF;
-						} else {
-							rdfstore_triple_pattern_add_context( tp, rdfstore_node_clone( (RDFStore_RDFNode)SvIV(SvRV(ST(i+16+num_subjects+num_predicates+num_objects))) ) );
-                                			};
-                        			};
-				};
-			};
-
-		if ( num_langs > 0 ) {
-			for ( i=0,len=0; i < num_langs ; i++) { /* we should check to not overflow the user stack here with num_langs!!!  try to use 'items' macro instead */
-				if (	( SvPOK(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts)) ) &&
-					( SvCUR(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts))>0) )
-					rdfstore_triple_pattern_add_lang( tp, (unsigned char *)(SvPV(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts), len)) );
-				};
-			};
-
-		if ( num_dts > 0 ) {
-			for ( i=0,len=0; i < num_dts ; i++) { /* we should check to not overflow the user stack here with num_dts!!!  try to use 'items' macro instead */
-				if (	( SvPOK(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs)) ) &&
-					( SvCUR(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs))>0) ) {
-					unsigned char * ddtt = SvPV(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs), len);
+		hval = hv_fetch( (HV*) SvRV(rpn), "rdf:datatype", 12, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					SvTRUE(node) &&
+					SvPOK(node) &&
+					SvCUR(node) ) {
+					unsigned char * ddtt = (unsigned char *)(SvPV(node,len));
 					rdfstore_triple_pattern_add_datatype( tp, ddtt, len );
-					};
+                        		};
+				};
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "words", 5, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					SvTRUE(node) &&
+					SvPOK(node) &&
+					SvCUR(node) ) {
+					unsigned char * word = (unsigned char *)(SvPV(node,len));
+					rdfstore_triple_pattern_add_word( tp, word, len );
+                        		};
+				};
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "ranges", 6, 0);
+		if(	hval &&
+			SvROK(*hval) &&
+			(SvTYPE(SvRV(*hval)) == SVt_PVAV) ) {
+			list = (AV*) SvRV(*hval);
+			for(i=0;i<=av_len(list);i++) {
+				node = *av_fetch(list, i, 0);
+				if (	( node != NULL ) &&
+					( node != &PL_sv_undef ) &&
+					SvTRUE(node) &&
+					SvPOK(node) &&
+					SvCUR(node) ) {
+					unsigned char * term = (unsigned char *)(SvPV(node,len));
+					rdfstore_triple_pattern_add_ranges( tp, term, len );
+                        		};
 				};
 			};
 
-		if ( num_words > 0 ) {
-			for ( i=0,len=0; i < num_words ; i++) { /* we should check to not overflow the user stack here with num_words!!!  try to use 'items' macro instead */
-				if (	( SvPOK(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs+num_dts)) ) &&
-					( SvCUR(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs+num_dts))>0) ) {
-					unsigned char * ww = SvPV(ST(i+16+num_subjects+num_predicates+num_objects+num_contexts+num_langs+num_dts), len);
-					rdfstore_triple_pattern_add_word( tp, ww, len );
-					};
-				};
+		hval = hv_fetch( (HV*) SvRV(rpn), "s_op", 4, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_subjects_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "p_op", 4, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_predicates_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "o_op", 4, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_objects_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "c_op", 4, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_contexts_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "xml:lang_op", 11, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_langs_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "rdf:datatype_op", 15, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_datatypes_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "words_op", 8, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_words_operator( tp, (	(strcmp(op,"and")==0) ||
+										(strcmp(op,"AND")==0) ||
+										(strcmp(op,"&")==0) ) ? 1 : 0 );
+			};
+		hval = hv_fetch( (HV*) SvRV(rpn), "ranges_op", 9, 0);
+		if(	hval &&
+			SvPOK(*hval) ) {
+			unsigned char * op = (unsigned char *)(SvPV(*hval,len));
+			rdfstore_triple_pattern_set_ranges_operator( tp, (
+						( (strcmp(op,"a < b")==0) || (strcmp(op,"a lt b")==0) ) ? 1 :
+						( (strcmp(op,"a <= b")==0) || (strcmp(op,"a le b")==0) ) ? 2 :
+						( (strcmp(op,"a == b")==0) || (strcmp(op,"a eq b")==0) ) ? 3 :
+						( (strcmp(op,"a != b")==0) || (strcmp(op,"a ne b")==0) ) ? 4 :
+						( (strcmp(op,"a >= b")==0) || (strcmp(op,"a ge b")==0) ) ? 5 : 
+						( (strcmp(op,"a > b")==0) || (strcmp(op,"a gt b")==0) ) ? 6 :
+						( (strcmp(op,"a < b < c")==0) || (strcmp(op,"a lt b lt c")==0) ) ? 7 :
+						( (strcmp(op,"a <= b < c")==0) || (strcmp(op,"a le b lt c")==0) ) ? 8 :
+						( (strcmp(op,"a <= b <= c")==0) || (strcmp(op,"a le b le c")==0) ) ? 9 :
+						( (strcmp(op,"a < b <= c")==0) || (strcmp(op,"a lt b le c")==0) ) ? 10 : 0 ));
 			};
 
-		rdfstore_triple_pattern_set_subjects_operator( tp, subjects_operator );
-		rdfstore_triple_pattern_set_predicates_operator( tp, predicates_operator );
-		rdfstore_triple_pattern_set_objects_operator( tp, objects_operator );
-		rdfstore_triple_pattern_set_contexts_operator( tp, contexts_operator );
-		rdfstore_triple_pattern_set_langs_operator( tp, langs_operator );
-		rdfstore_triple_pattern_set_datatypes_operator( tp, dts_operator );
-		rdfstore_triple_pattern_set_words_operator( tp, words_operator );
+		/* special not used yet... */
+		hval = hv_fetch( (HV*) SvRV(rpn), "search_type", 11, 0);
+		if(	hval &&
+			SvIOK(*hval) ) {
+			search_type = ( SvIV(*hval) ) ? 1 : 0;
+			};
 
 		cc = rdfstore_search( mm, tp, search_type );
 
@@ -2331,12 +2486,13 @@ MODULE = RDFStore       PACKAGE = DBMS
 PROTOTYPES: DISABLE
 
 DBMS
-TIEHASH(class,name,mode=DBMS_MODE,host=DBMS_HOST,port=DBMS_PORT)
+TIEHASH(class,name,mode=DBMS_MODE,bt_compare_fcn_type=0,host=DBMS_HOST,port=DBMS_PORT)
 	char * 		class
 	char *		name
 	dbms_xsmode_t	mode
 	char *		host
 	int		port
+	int		bt_compare_fcn_type
 
 	PREINIT:
 	dbms * me;
@@ -2344,7 +2500,7 @@ TIEHASH(class,name,mode=DBMS_MODE,host=DBMS_HOST,port=DBMS_PORT)
 	CODE: 
 	class = class;
 
-	me = dbms_connect(name,host,port,mode,&safemalloc,&safefree,NULL,&set_dbms_error);
+	me = dbms_connect(name,host,port,mode,&safemalloc,&safefree,NULL,&set_dbms_error, bt_compare_fcn_type);
 	if (me==NULL) 
 		XSRETURN_UNDEF;
 	
@@ -2455,6 +2611,26 @@ DELETE(me, key)
                 XSRETURN_UNDEF;
 
         RETVAL = (retval == 0) ? 1 : 0;
+
+	OUTPUT:
+
+        RETVAL                               
+
+DBT
+FROM(me, key)
+	DBMS	me	
+	DBT		key
+
+        PREINIT:
+	int retval;
+
+        CODE:
+	RETVAL.data = NULL; RETVAL.size = 0;
+        if(dbms_comms(me, TOKEN_FROM, &retval, &key, NULL, &RETVAL, NULL))
+                XSRETURN_UNDEF;
+
+	if (retval == 1)
+		XSRETURN_UNDEF;
 
 	OUTPUT:
 

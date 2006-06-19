@@ -137,12 +137,13 @@ int main ( int argc, char * * argv ) {
 			gettimeofday(&tnow,NULL);
         		ttime += ( tnow.tv_sec - tstart.tv_sec ) * 1000000 + ( tnow.tv_usec - tstart.tv_usec ) * 1;
         		/*ttime = ( tnow.tv_sec - tstart.tv_sec ) * 1000000 + ( tnow.tv_usec - tstart.tv_usec ) * 1;*/
-			printf("adding %d [%d sec]\n",i,(int)(ttime/1000000));
+			printf("adding\t%d\t[%8d sec, %.02f #/sec]\n",i,(int)(ttime/1000000), 1000000.0*i/ttime);
 
 			gettimeofday(&tstart,NULL);	
 		};
 	};
 
+	exit(1);
 	for ( i=1; i<n+1; i++ ) {
 		#define BZ(x) { if ((x)==NULL) { fprintf(stderr,"No memory"); exit(1); }; bzero((x),sizeof(*(x))); }
 

@@ -70,7 +70,7 @@ An on-line demostration of the capabilities of RDFStore is available at http://d
 
 COPYRIGHT
 
-Copyright (c) 2000-2003 All rights reserved
+Copyright (c) 2000-2006 All rights reserved
 Alberto Reggiori <areggiori@webweaving.org>
 Dirk-Willem van Gulik <dirkx@webweaving.org>
 
@@ -78,4 +78,4 @@ Parts copyright (c) 1991-2000 iMatix Corporation.
 
 This product uses parts of the iMatix SFL, Copyright 1991-2000 iMatix Corporation <http://www.imatix.com>.
 
-$Id: README,v 1.6 2003/11/26 10:24:54 areggiori Exp $
+$Id: README,v 1.7 2006/06/19 10:10:21 areggiori Exp $

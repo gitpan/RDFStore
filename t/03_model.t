@@ -1,6 +1,6 @@
 use strict ;
  
-BEGIN { print "1..127\n"; };
+BEGIN { print "1..130\n"; };
 END { print "not ok 1\n" unless $::loaded; RDFStore::debug_malloc_dump(); eval{ rmtree('cooltest'); }; };
 
 my $a = "";
@@ -163,12 +163,23 @@ ok $tt++, my $model = new RDFStore::Model(	Name => 'cooltest',
 						);
 ok $tt++,  $model->setSourceURI('http://somewhere.org/');
 my $now='t'.time;
-ok $tt++, $model->setContext($factory->createResource($now));
+my $ctx = $factory->createResource($now);
+ok $tt++, $model->setContext($ctx);
 ok $tt++, ( $factory->createResource($now)->equals( $model->getContext ) );
 ok $tt++, ($model->getSourceURI eq 'http://somewhere.org/');
 ok $tt++, ($model->toString eq 'Model[http://somewhere.org/]');
 ok $tt++, !(defined $model->getNamespace);
+my @date = gmtime( time() );
+my $nowdateTime = sprintf( "%04d-%02d-%02dT%02d:%02d:%02dZ", 1900+int($date[5]), 1+int($date[4]), 
+				int($date[3]), int($date[2]), int($date[1]), int($date[0]) );
+ok $tt++, ! $model->ifModifiedSince( $nowdateTime );
+sleep(1);
 ok $tt++, $model->add($statement);
+ok $tt++, $model->ifModifiedSince( $nowdateTime );
+@date = gmtime( time() );
+$nowdateTime = sprintf( "%04d-%02d-%02dT%02d:%02d:%02dZ", 1900+int($date[5]), 1+int($date[4]), 
+				int($date[3]), int($date[2]), int($date[1]), int($date[0]) );
+ok $tt++, ! $model->ifModifiedSince( $nowdateTime );
 ok $tt++, $model->add($statement0);
 ok $tt++, $model->add($statement1);
 ok $tt++, $model->add($statement2);
@@ -182,7 +193,7 @@ ok $tt++, $model->add($statement5);
 ok $tt++, $model->setContext($factory->createResource($now));
 ok $tt++, !($model->isEmpty);
 ok $tt++, ($model->size == 7);
-ok $tt++, ($model->contains($statement1));
+ok $tt++, ($model->contains($statement1,$ctx));
 ok $tt++, ($model->isMutable);
 
 eval {
@@ -323,7 +334,7 @@ eval {
 };
 ok $tt++, !$@;
 
-ok $tt++, (!($model->contains($statement5)));
+ok $tt++, (!($model->contains($statement5,$model->getContext)));
 ok $tt++, $model->resetContext;
 ok $tt++, ($model->contains($statement5));
 

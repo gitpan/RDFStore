@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -152,6 +152,7 @@ CC(TOKEN_STORE    );
 CC(TOKEN_DELETE  );
 CC(TOKEN_NEXTKEY );
 CC(TOKEN_FIRSTKEY);
+CC(TOKEN_FROM );
 CC(TOKEN_EXISTS );
 CC(TOKEN_SYNC  );
 CC(TOKEN_INIT  );
@@ -171,23 +172,35 @@ CC(TOKEN_DROP    );
 }
 
 static char    *
-_hex(int len, void *str)
+_hex(dbms * me, int len, void *str)
 {
 	size_t		i;
 	char           *r = NULL;
 
-	if (len == 0)
-		return strdup("[0]\"\"");
+	if (len == 0) {
+		r = (char *) (*me->malloc)( strlen("[0]\"\"")+1 );
+		strcpy( r, "[0]\"\"" );
+		return r;
+		};
 
-	if (str == NULL)
-		return strdup("<null>");
+	if (str == NULL) {
+		r = (char *) (*me->malloc)( strlen("<null>")+1 );
+		strcpy( r, "<null>" );
+		return r;
+		};
 
-	if (len > 50000)
-		return strdup("<toolong>");
+	if (len > 50000) {
+		r = (char *) (*me->malloc)( strlen("<toolong>")+1 );
+		strcpy( r, "<toolong>" );
+		return r;
+		};
 
-	r = malloc(3*len + 100);
-	if (r == 0) 
-		return strdup("<outofmem>");
+	r = (char *) (*me->malloc)(3*len + 100);
+	if (r == NULL) {
+		r = (char *) (*me->malloc)( strlen("<outofmem>")+1 );
+		strcpy( r, "<outofmem>" );
+		return r;
+		};
 
 	sprintf(r, "[%06d]\"", len);
 
@@ -213,7 +226,8 @@ dbms_connect(
 	     void *(*_my_malloc) (size_t s),
 	     void (*_my_free) (void *adr),
 	     void (*_my_report) (dbms_cause_t event, int count),
-	     void (*_my_error) (char *err, int erx)
+	     void (*_my_error) (char *err, int erx),
+	     int bt_compare_fcn_type
 )
 {
 	dbms           *me;
@@ -241,6 +255,8 @@ dbms_connect(
 	me = (dbms *) (*_my_malloc) (sizeof(dbms));
 	if (me == NULL)
 		return NULL;	/* rely on errno */
+
+	me->bt_compare_fcn_type = bt_compare_fcn_type;
 
 	me->malloc = _my_malloc;
 	me->free = _my_free;
@@ -279,8 +295,19 @@ dbms_connect(
 	me->sockfd = -1;
 	me->mode = (u_long) mode;
 	me->port = port;
-	me->name = strdup(name);
-	me->host = strdup(host);
+	me->name = (char *) (*me->malloc)( strlen(name)+1 );
+	if( me->name == NULL ) {
+		(*(me->free)) (me);
+		return NULL;
+		};
+	strcpy( me->name, name );
+	me->host = (char *) (*me->malloc)( strlen(host)+1 );
+	if( me->host == NULL ) {
+		(*(me->free)) (me->name);
+		(*(me->free)) (me);
+		return NULL;
+		};
+	strcpy( me->host, host );
 
 	/*
 	 * quick and dirty hack to check for IP vs FQHN and fall through when
@@ -714,16 +741,18 @@ reselect(dbms * me)
 {
 	DBT             r1, r2, v1;
 	int             retval;
-	u_long          buff[2];
+	u_long          buff[3];
 	int             err = 0;
 	u_long          proto = DBMS_PROTO;
 	u_long          mode = me->mode;
 	char           *name = me->name;
+	u_long          bt_compare_fcn_type = me->bt_compare_fcn_type;
 
-	assert(sizeof(buff) == 8);	/* really 4 bytes on the network ? */
+	assert(sizeof(buff) == 12);	/* really 4 bytes on the network ? */
 
 	buff[0] = htonl(proto);
 	buff[1] = htonl(mode);
+	buff[2] = htonl(bt_compare_fcn_type);
 
 	r1.size = sizeof(buff);
 	r1.data = &buff;
@@ -775,16 +804,16 @@ dbms_comms(
 		char           *p1 = NULL;
 		char           *p2 = NULL;
 		if (v1)
-			p1 = _hex(v1->size, v1->data);
+			p1 = _hex(me, v1->size, v1->data);
 		if (v2)
-			p2 = _hex(v2->size, v2->data);
+			p2 = _hex(me, v2->size, v2->data);
 
 		_tlog("%s@%s:%d %s(%02d) >>> %s %s",
 		      me->name, me->host,me->port, _token2name(token), token,
 		      p1 ? p1 : "<null>",
 		      p2 ? p2 : "<null>");
-		if (p1) free(p1);
-		if (p2) free(p2);
+		if (p1) (*me->free)(p1);
+		if (p2) (*me->free)(p2);
 	}
 	/*
 	 * for now, SA_RESTART any interupted function calls
@@ -849,16 +878,16 @@ dbms_comms(
 		char           *q1 = NULL;
 		char           *q2 = NULL;
 		if (r1)
-			q1 = _hex(r1->size, r1->data);
+			q1 = _hex(me, r1->size, r1->data);
 		if (r2)
-			q2 = _hex(r2->size, r2->data);
+			q2 = _hex(me, r2->size, r2->data);
 
 		_tlog("%s@%s:%d %s(%02d) <<< %s %s",
 		      me->name, me->host,me->port, _token2name(token), token,
 		      q1 ? q1 : "<null>",
 		      q2 ? q2 : "<null>");
-		if (q1) free(q1);
-		if (q2) free(q2);
+		if (q1) (*me->free)(q1);
+		if (q2) (*me->free)(q2);
 	}
 	return err;
 };

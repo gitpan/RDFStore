@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -35,7 +35,8 @@ dbms_connect(
         char *name, char * host, int port, int mode,
         void *(*_my_malloc)( size_t size),
         void(*_my_free)(void *),
-        void(*_my_report)(dbms_cause_t cause, int count)
+        void(*_my_report)(dbms_cause_t cause, int count),
+	int bt_compare_fcn_type
 );
 
 extern dbms_error_t

@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -16,6 +16,7 @@ TFILE=dbms-`date +%Y-%m-%d`
 all: 
 	( cd deamon; make )
 	( cd libdbms; make )
+	( cd dbmsproxy; make )
 	( cd client; perl Makefile.PL && make )
 
 tar:	clean
@@ -32,10 +33,13 @@ test:
 clean:
 	( cd deamon; make clean )
 	( cd libdbms; make clean )
+	( cd dbmsproxy; make clean )
 	( cd client; make realclean )
 
 install: all
 	( cd deamon; make install )
+	( cd dbmsproxy; make install )
+	( cd libdbms; make install )
 
 depend:
 	( cd deamon; make depend )

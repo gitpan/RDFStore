@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -12,6 +12,8 @@
 # *
 # * Changes:
 # *     version 0.1 - Tue Dec 16 00:51:44 CET 2003
+# *     version 0.2
+# *		- updated wget() adding Accept: HTTP header and use LWP::UserAgent if available
 # *
 
 package RDFStore::Parser;
@@ -19,9 +21,12 @@ package RDFStore::Parser;
 use vars qw ( $VERSION %Built_In_Styles );
 use strict;
  
-$VERSION = '0.1';
+$VERSION = '0.2';
 
 use Carp;
+
+eval { require LWP::UserAgent; };
+$RDFStore::Parser::hasLWPUserAgent = ($@) ? 0 : 1;
 
 sub new {
 	my ($pkg, %args) = @_;
@@ -182,86 +187,111 @@ sub wget {
         croak "RDFStore::Parser::wget: input url is not an instance of URI"
                 unless( (defined $uri) && ($uri->isa("URI")) );
 
-        # well, try to be serious here :)
         no strict;
 
-        require IO::Socket;
+	if($RDFStore::Parser::hasLWPUserAgent) {
+		# HTTP GET it
+		my $ua = LWP::UserAgent->new( timeout => 60 );
 
-        local($^W) = 0;
-        my $sock = IO::Socket::INET->new(       PeerAddr => $uri->host,
-                                                PeerPort => $uri->port,
-                                                Proto    => 'tcp',
-                                                Timeout  => 60) || return undef;
-        $sock->autoflush;
-        my $netloc = $uri->host;
-        $netloc .= ":".$uri->port if $uri->port != 80;
+		my %headers = ( "User-Agent" => "rdfstore\@asemantics.com/$VERSION" );
+		$headers{'Accept'} = 'application/rdf+xml,application/xml;q=0.9,*/*;q=0.5'
+			if($class->isa("RDFStore::Parser::SiRPAC"));
 
-        my $path = $uri->as_string;
+                my $response = $ua->get( $uri->as_string, %headers );
 
-        #HTTP/1.0 GET request
-        print $sock join("\015\012" =>
+                unless($response) {
+			my $msg = "RDFStore::Parser::wget: Cannot HTTP GET $uri->as_string\n";
+			push @{ $class->{warnings} },$msg;
+			return;
+			};
+
+                return $response->content;
+	} else {
+        	require IO::Socket;
+
+        	local($^W) = 0;
+        	my $sock = IO::Socket::INET->new(       PeerAddr => $uri->host,
+                                                	PeerPort => $uri->port,
+                                                	Proto    => 'tcp',
+                                                	Timeout  => 60) || return undef;
+        	$sock->autoflush;
+        	my $netloc = $uri->host;
+        	$netloc .= ":".$uri->port if $uri->port != 80;
+
+        	my $path = $uri->as_string;
+
+        	#HTTP/1.0 GET request
+        	print $sock join("\015\012" =>
                     "GET $path HTTP/1.0",
                     "Host: $netloc",
                     "User-Agent: rdfstore\@asemantics.com/$VERSION",
+		    ($class->isa("RDFStore::Parser::SiRPAC")) ? "Accept: application/rdf+xml,application/xml;q=0.9,*/*;q=0.5" : "",
                     "", "");
 
-        my $line = <$sock>;
+        	my $line = <$sock>;
 
-	if ($line !~ m,^HTTP/\d+\.\d+\s+(\d\d\d)\s+(.+)$,m) {
-                my $msg = "RDFStore::Parser::wget: (10 Did not get HTTP/x.x header back...$line";
-                push @{ $class->{warnings} },$msg;
-                warn $msg;
-                return;
-                };
-        my $status = $1;
-        my $reason = $2;
-        if ( ($status != 200) && ($status != 302) ) {
-                my $msg = "Error MSG returned from server: $status $reason\n";
-                push @{ $class->{warnings} },$msg;
+		if ($line !~ m,^HTTP/\d+\.\d+\s+(\d\d\d)\s+(.+)$,m) {
+                	my $msg = "RDFStore::Parser::wget: (10 Did not get HTTP/x.x header back...$line";
+                	push @{ $class->{warnings} },$msg;
+                	warn $msg;
+                	return;
+                	};
+        	my $status = $1;
+        	my $reason = $2;
+        	if ( ($status != 200) && ($status != 302) ) {
+                	my $msg = "Error MSG returned from server: $status $reason\n";
+                	push @{ $class->{warnings} },$msg;
 
-                #try HTTP/1.1 GET request
-                print $sock join("\015\012" =>
+                	#try HTTP/1.1 GET request
+                	print $sock join("\015\012" =>
                                  "GET $path HTTP/1.1",
                                  "Host: $netloc",
                                  "User-Agent: rdfstore\@asemantics.com/$VERSION",
+		    		($class->isa("RDFStore::Parser::SiRPAC")) ? "Accept: application/rdf+xml,application/xml;q=0.9,*/*;q=0.5" : "",
                                  "Connection: close",
                                  "", "");
 
-                $line = <$sock>;
+                	$line = <$sock>;
 
-                if ($line !~ m,^HTTP/\d+\.\d+\s+(\d\d\d)\s+(.+)$,m) {
-                        my $msg = "RDFStore::Parser::wget: Did not get HTTP/x.x header back...$line";
-                        push @{ $class->{warnings} },$msg;
-                        warn $msg;
-                        return;
-                        };
-                $status = $3;
-                $reason = $4;
+                	if ($line !~ m,^HTTP/\d+\.\d+\s+(\d\d\d)\s+(.+)$,m) {
+                        	my $msg = "RDFStore::Parser::wget: Did not get HTTP/x.x header back...$line";
+                        	push @{ $class->{warnings} },$msg;
+                        	warn $msg;
+                        	return;
+                        	};
+                	$status = $3;
+                	$reason = $4;
 
-		if ( ($status != 200) && ($status != 302) ) {
-                        my $msg = "RDFStore::Parser::wget: Error MSG returned from server: $status $reason\n";
-                        push @{ $class->{warnings} },$msg;
-                        return;
-                        };
-                };
+			if ( ($status != 200) && ($status != 302) ) {
+                        	my $msg = "RDFStore::Parser::wget: Error MSG returned from server: $status $reason\n";
+                        	push @{ $class->{warnings} },$msg;
+                        	return;
+                        	};
+                	};
 
-        while(<$sock>) {
-                chomp;
-                if( m,^Location:\s(.*)$,) {
-                        if( (   (exists $class->{HTTP_Location}) &&
-                                (defined $class->{HTTP_Location}) && ($class->{HTTP_Location} ne $1)    ) || 
+        	while(<$sock>) {
+                	chomp;
+                	if( m,^Location:\s(.*)$,) {
+                        	if( (   (exists $class->{HTTP_Location}) &&
+                                	(defined $class->{HTTP_Location}) && ($class->{HTTP_Location} ne $1)    ) || 
                                         (!(defined $class->{HTTP_Location})) ) {
-                                $class->{HTTP_Location} = $1;
-                                my $s = $class->wget(new URI($class->{HTTP_Location}));
-                                $sock = $s
-                                        if(defined $s);
-                                last;
-                                };
-                        };
-                last if m/^\s+$/;
-                };
+                                	$class->{HTTP_Location} = $1;
+                                	my $s = $class->wget(new URI($class->{HTTP_Location}));
+                                	$sock = $s
+                                        	if(defined $s);
+                                	last;
+                                	};
+                        	};
+                	last if m/^\s+$/;
+                	};
 
-        return $sock;
+		my $content='';
+		while(<$sock>) {
+			$content.=$_;
+			};
+
+        	return $content;
+		};
         };
 
 1;

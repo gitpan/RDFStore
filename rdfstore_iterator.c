@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore_iterator.c,v 1.14 2004/08/19 18:57:14 areggiori Exp $
+# $Id: rdfstore_iterator.c,v 1.16 2006/06/19 10:10:21 areggiori Exp $
 #
 */
 
@@ -969,7 +969,7 @@ int rdfstore_iterator_remove (
 #endif
 
 	/* zap current pos - we do not check whether is zero already or not....yet :) */
-	if( ! rdfstore_bits_setmask(& me->ids_size, me->ids, me->pos, 1, 0, sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)) )
+	if( ! rdfstore_bits_setmask(& me->ids_size, me->ids, me->pos, 1, 0, sizeof(me->ids)) )
 		return 0;
 
 #ifdef RDFSTORE_DEBUG
@@ -1236,7 +1236,7 @@ rdfstore_iterator_subtract (
         ) {
 	rdfstore_iterator * results;
 	register int i=0;
-	unsigned char not[MAXRECORDS_BITS_SIZE];
+	unsigned char not[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 
 	if (	( me == NULL ) ||
 		( you == NULL ) )
@@ -1491,7 +1491,7 @@ rdfstore_iterator_duplicate (
                	};
         results->store = me->store;
         results->store->attached++; /* one more attached I guess */
-        /*bzero(results->ids,sizeof(unsigned char)*(MAXRECORDS_BITS_SIZE)); */
+        /*bzero(results->ids,sizeof(results->ids)); */
         bcopy(me->ids,results->ids,sizeof(unsigned char)*me->ids_size);
         results->ids_size = me->ids_size;
         results->remove_holes = me->remove_holes;

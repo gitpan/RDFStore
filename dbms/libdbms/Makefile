@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *     		   Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -54,9 +54,12 @@ man: libdbms.3
 	cat libdbms.3 | gzip > libdbms.3.gz
 
 install: man libdbms.a
-	mkdir -p $(INSTDIR)/lib $(INSTDIR)/man/man3
+	-mkdir -p $(INSTDIR)/lib $(INSTDIR)/man/man3 $(INSTDIR)/include
 	$(INSTALL) -m 0555 -o $(UID) -g $(GID) libdbms.a $(INSTDIR)/lib
 	$(INSTALL) -m 0644 -o $(UID) -g $(GID) libdbms.3.gz $(INSTDIR)/man/man3
+	$(INSTALL) -m 0444 -o $(UID) -g $(GID) ../include/dbms.h  $(INSTDIR)/include
+	$(INSTALL) -m 0444 -o $(UID) -g $(GID) ../include/dbms_comms.h  $(INSTDIR)/include
+	$(INSTALL) -m 0444 -o $(UID) -g $(GID) ../include/dbms_compat.h  $(INSTDIR)/include
 
 depend:
 	makedepend $(INCLUDES) $(DEFINES) $(SRCS)

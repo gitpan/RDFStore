@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -11,7 +11,7 @@
  *     http://rdfstore.sourceforge.net/LICENSE
  *
  *
- * $Id: dbmsd.h,v 1.12 2004/08/19 18:57:36 areggiori Exp $
+ * $Id: dbmsd.h,v 1.13 2006/06/19 10:10:22 areggiori Exp $
  */
 #ifndef _H_DBMSD
 #define _H_DBMSD

@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *	                   Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -72,7 +72,7 @@ an error.
 
 =head1 VERSION
 
-$Id: DBMS.pm,v 1.3 2004/08/19 18:57:47 areggiori Exp $
+$Id: DBMS.pm,v 1.5 2006/06/19 10:10:24 areggiori Exp $
 
 =head1 AVAILABILITY
 
@@ -109,7 +109,7 @@ use Tie::Hash;
 use AutoLoader;
 @ISA = qw(Tie::Hash);
 
-$VERSION = "1.2";
+$VERSION = "1.7";
 
 # some inlin-ed h2ph macros - need to be in-sync with dbms/include/dbms.h
 eval("sub DBMS::EVENT_RECONNECT () { 0; }") unless defined(&DBMS::EVENT_RECONNECT);
@@ -119,6 +119,12 @@ eval("sub DBMS::XSMODE_RDONLY () { 1; }") unless defined(&DBMS::XSMODE_RDONLY);
 eval("sub DBMS::XSMODE_RDWR () { 2; }") unless defined(&DBMS::XSMODE_RDWR);
 eval("sub DBMS::XSMODE_CREAT () { 3; }") unless defined(&DBMS::XSMODE_CREAT);
 eval("sub DBMS::XSMODE_DROP () { 4; }") unless defined(&DBMS::XSMODE_DROP);
+
+
+# B-tree comparinson functions - see include/rdfstore_flat_store.h for definitions
+eval("sub DBMS::BT_COMP_INT () { 7000; }") unless defined(&DBMS::BT_COMP_INT);
+eval("sub DBMS::BT_COMP_DOUBLE () { 7001; }") unless defined(&DBMS::BT_COMP_DOUBLE);
+eval("sub DBMS::BT_COMP_DATE () { 7002; }") unless defined(&DBMS::BT_COMP_DATE);
 
 sub inc {
 	my($class,$key)=@_;

@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -164,7 +164,7 @@ sub setDomain {
 	$class->connect
 		unless($class->isConnected);
 
-	# NOTE: need to think/fix the context/provenance story - also because whn connect to another store what happens? another context or the same with
+	# NOTE: need to think/fix the context/provenance story - also because when connect to another store what happens? another context or the same with
 	#       a different dc:date and dc:source? same ID? boooh....but very important especially when adding URN DDDS registration to this class :o)
 	## create rdfstore:Context for this RDF object
 	#$self->{'context'} = _createbNode( $self );
@@ -484,7 +484,7 @@ A "RDF object" wrapper around RDFStore::Model
 
 =head1 SEE ALSO
 
-RDFStore::Model(3)
+RDFStore::Model(3) Class::RDF(3)
 
 =head1 ABOUT RDF Objects
 

@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore_iterator.h,v 1.4 2004/08/19 18:57:43 areggiori Exp $
+# $Id: rdfstore_iterator.h,v 1.6 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 
@@ -76,7 +76,7 @@
 typedef struct rdfstore_iterator {
         struct rdfstore * store;
         unsigned int size; /* num of statements i.e. number of bits set in ids[] below */
-        unsigned char ids[MAXRECORDS_BITS_SIZE]; /* keep the set of statements for search iterators i.e. bit vector 1 bit per statement */
+        unsigned char ids[RDFSTORE_MAXRECORDS_BYTES_SIZE]; /* keep the set of statements for search iterators i.e. bit vector 1 bit per statement */
         unsigned int ids_size; /* its size in bytes also */
         unsigned int remove_holes;
         unsigned int st_counter;

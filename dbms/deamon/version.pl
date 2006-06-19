@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -11,7 +11,7 @@
 # *
 # *     http://rdfstore.sourceforge.net/LICENSE
 # *
-$rcsid='$Id: version.pl,v 1.7 2004/08/19 18:57:37 areggiori Exp $';
+$rcsid='$Id: version.pl,v 1.8 2006/06/19 10:10:23 areggiori Exp $';
 #
 $h=`hostname`;
 chop $h;

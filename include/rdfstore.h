@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: rdfstore.h,v 1.37 2004/08/19 18:57:43 areggiori Exp $
+# $Id: rdfstore.h,v 1.48 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 
@@ -74,21 +74,32 @@
 #include <netinet/in.h>
 #include <dbms.h>
 
+#ifdef SUNOS4
+double strtod();                /* SunOS needed this */
+#endif
+
 #include "rdfstore_flat_store.h"
 #include "rdfstore_compress.h"
 
 #define RDFSTORE_MAX_URI_LENGTH		MAXPATHLEN		/* not sure here - a URI can be longer probably */
 #define RDFSTORE_WORD_SPLITS		"\v\f\n\r\t ,:;'\"!#$%^&*()~`_=+{}[]<>?.-/\\|"	/* for free-text stuff */
+#define RDFSTORE_RDF_PARSETYPE_LITERAL	"http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral"
+#define RDFSTORE_MAX_LANG_LENGTH	50			/* not sure here - a URI can be longer probably */
+
 #ifndef RDFSTORE_WORD_STEMMING
 #define RDFSTORE_WORD_STEMMING		(5) /* up to 5 chars from start or end of word */
 #endif
-#define RDFSTORE_RDF_PARSETYPE_LITERAL	"http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral"
 
-#define MAXRECORDS (2097152) /* decrease this value if you get too many core dumps - it should be system dependend/calculated */
-#define MAXRECORDS_BITS_SIZE    (MAXRECORDS/8) /* one bit per statement */
-#define MAXRECORDS_BYTES_SIZE   (MAXRECORDS/2) /* considering that nindex takes up to 6 bits per statement */
+#if (! defined(RDFSTORE_MAXRECORDS)) || (RDFSTORE_MAXRECORDS < 128)
+#define RDFSTORE_MAXRECORDS (2097152)
+#endif
+
+#define RDFSTORE_RECORDS_PER_BYTE	8
+#define RDFSTORE_MAXRECORDS_BYTES_SIZE  ( RDFSTORE_MAXRECORDS / RDFSTORE_RECORDS_PER_BYTE ) /* one bit per statement */
 
 #define RDFSTORE_MAX_FETCH_OBJECT_DEEPNESS	20	/* max levels to visit when return "coincise bounded description of a resource" */
+
+#define RDFSTORE_INDEXING_VERSION	"20041222"	/* which is even more modern than the SWAD-e paper one */
 
 /* very basic data types */
 
@@ -113,7 +124,7 @@ typedef struct RDF_Node {
                 	unsigned char    * string;
 			int	string_len;
                 	int     parseType; /* 0=Resource 1=Literal i.e. XML */
-                	unsigned char    lang[10];
+                	unsigned char    lang[RDFSTORE_MAX_LANG_LENGTH];
                 	unsigned char    * dataType; /* XMLSchema URI ref to the data type for the literal */
                 	} literal;
         	} value;
@@ -160,6 +171,28 @@ typedef struct RDF_Triple_Pattern {
 	unsigned int dts_operator;
         struct RDF_Triple_Pattern_Part * words;
 	unsigned int words_operator;
+        struct RDF_Triple_Pattern_Part * ranges;
+	unsigned int ranges_operator; /*	One axe ranges (considering first element from ranges linked list):
+	
+						1 = x <  22.34
+						2 = x <= .45
+						3 = x == 23.45
+						4 = x != 23.45
+						5 = x >= .748748
+						6 = x >  .0002 
+
+						Two axes ranges (considering first 2 elements from ranges linked list):
+
+						7  = 21.23 < x < 22.34     i.e. x >  21.23  &&  x <  22.34
+						8  = 21.23 <= x < 22.34    i.e. x >= 21.23  &&  x <  22.34
+						9  = 21.23 <= x <= 22.34   i.e. x >= 21.33  &&  x <= 22.34
+						10 = 21.23 < x <= 22.34    i.e. x >  21.33  &&  x <= 22.34
+
+						Values in ranges are euristacally parsed either to a long or double; and xsd_integer or xsd_double
+						special tables (b-trees) are used to answer the range question. If the RDF literal has an rdf:datatype
+						of xsd:date or xsd:dateTime, such range operations can be carried out on dataes using the xsd_date table.
+
+						*/
         } RDF_Triple_Pattern;
 
 #include "rdfstore_digest.h"
@@ -182,19 +215,23 @@ typedef struct rdfstore {
 	FLATDB	* p_connections;
 	FLATDB	* o_connections;
 	FLATDB	* windex;
+	FLATDB	* xsd_integer; /* xsd:integer */
+	FLATDB	* xsd_double; /* xsd:float or xsd:double special one */
+	FLATDB	* xsd_date; /* xsd:date or xsd:dateTime */
 	int	remote;
 	int	port;
 	RDF_Node * context; /* default context/statement-group stuff */
         struct rdfstore_iterator * cursor;
 	int	attached; /* the number of items (cursors) currenlty attached */
 	int	tobeclosed; /* set to 1 means that the iterator attached has to close the storage itself */
+	char	version[10];
 
 	char	host[ MAXPATHLEN ];
         char	uri[ RDFSTORE_MAX_URI_LENGTH ]; /* source URI */
 	char	name[ MAXPATHLEN ];
 
-	unsigned char bits_encode[MAXRECORDS_BYTES_SIZE]; /* buffers for compression and decompression */
-        unsigned char bits_decode[MAXRECORDS_BYTES_SIZE];
+	unsigned char bits_encode[RDFSTORE_MAXRECORDS_BYTES_SIZE]; /* buffers for compression and decompression */
+        unsigned char bits_decode[RDFSTORE_MAXRECORDS_BYTES_SIZE];
 
 	/* Functions for encoding/decoding - MUST match */
         void(*func_encode)(unsigned int,unsigned char*, unsigned int *, unsigned char *);
@@ -307,6 +344,8 @@ RDF_Triple_Pattern_Part * rdfstore_triple_pattern_add_datatype( RDF_Triple_Patte
 int rdfstore_triple_pattern_set_datatypes_operator( RDF_Triple_Pattern * tp, int op );
 RDF_Triple_Pattern_Part * rdfstore_triple_pattern_add_word( RDF_Triple_Pattern * tp, unsigned char * word, int len );
 int rdfstore_triple_pattern_set_words_operator( RDF_Triple_Pattern * tp, int op );
+RDF_Triple_Pattern_Part * rdfstore_triple_pattern_add_ranges( RDF_Triple_Pattern * tp, char * num, int len ); /* always do strtol() or strtod() on it */
+int rdfstore_triple_pattern_set_ranges_operator( RDF_Triple_Pattern * tp, int op );
 int rdfstore_triple_pattern_free( RDF_Triple_Pattern * tp );
 void rdfstore_triple_pattern_dump( RDF_Triple_Pattern * tp );
 
@@ -328,6 +367,10 @@ rdfstore_connect (
         void (* error)(char * err, int erx)
 	);
 
+char * rdfstore_get_version (
+	rdfstore * me
+	);
+
 int rdfstore_disconnect (
 	rdfstore * me
 	);
@@ -339,6 +382,16 @@ int rdfstore_isconnected (
 int rdfstore_isremote (
 	rdfstore * me
 	);
+
+int rdfstore_if_modified_since (
+        char * name,
+        char * since,
+        /* Callbacks for memory management and error handling. */
+        void *(*_mmalloc) (size_t s),
+        void (*_mfree) (void *adr),
+        void (*_mcallback) (dbms_cause_t cause, int cnt),
+        void (*_merror) (char *err, int erx) 
+        );
 
 int rdfstore_size ( 
 	rdfstore 	* me,
@@ -416,12 +469,14 @@ rdfstore_elements (
 /* Special keys with a special meaning.  - should be longer than 4 bytes to
  * make sure they do not match a unsigned int.
  */
+#define RDFSTORE_INDEXING_VERSION_KEY 	("indexing_version")
 #define RDFSTORE_COUNTER_KEY 		("counter")
 #define RDFSTORE_COUNTER_REMOVED_KEY 	("counter_removed")
 #define RDFSTORE_FREETEXT_KEY 		("freetext")
 #define RDFSTORE_NAME_KEY 		("name")
 #define RDFSTORE_COMPRESSION_KEY 	("compression")
 #define RDFSTORE_COMPRESSION_CONNECTIONS_KEY 	("compression_connections")
+#define RDFSTORE_LASTMODIFIED_KEY 	("last_modified")
 
 #if 0
 void packInt(uint32_t value, unsigned char *lookup);

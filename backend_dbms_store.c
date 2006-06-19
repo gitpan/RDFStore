@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: backend_dbms_store.c,v 1.6 2004/08/19 18:57:12 areggiori Exp $
+# $Id: backend_dbms_store.c,v 1.10 2006/06/19 10:10:21 areggiori Exp $
 */
 #include "dbms.h"
 #include "dbms_compat.h"
@@ -204,6 +204,7 @@ backend_dbms_reset_debuginfo(
 	me->num_dec = 0;
 	me->num_sync = 0;
 	me->num_next = 0;
+	me->num_from = 0;
 	me->num_first = 0;
 	me->num_delete = 0;
 	me->num_clear = 0;
@@ -228,7 +229,8 @@ backend_dbms_open(
 		  void *(*_my_malloc) (size_t size),
 		  void (*_my_free) (void *),
 		  void (*_my_report) (dbms_cause_t cause, int count),
-		  void (*_my_error) (char *err, int erx)
+		  void (*_my_error) (char *err, int erx),
+		  int bt_compare_fcn_type
 )
 {
 	dbms_store_t   **mme = (dbms_store_t **) emme;
@@ -265,7 +267,7 @@ backend_dbms_open(
 #endif
 
 	if (!remote) {
-		backend_dbms_set_error(me, "DBMS can only be remote", FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, "DBMS can only be remote", FLAT_STORE_E_CANNOTOPEN);
 		perror("backend_dbms_open");
 		_my_free(me);
 		return FLAT_STORE_E_CANNOTOPEN;
@@ -287,10 +289,10 @@ backend_dbms_open(
 		   ((ro == 0) ? (DBMS_XSMODE_CREAT) : (DBMS_XSMODE_RDONLY)),
 				      _my_malloc, _my_free,	/* malloc/free to use */
 				      _my_report,	/* Callback for warnings */
-				      _my_error	/* Calllback to set
-						 * error(variables) */
+				      _my_error,	/* Calllback to set error(variables) */
+				      bt_compare_fcn_type
 				      ))) == NULL) {
-		backend_dbms_set_error(me, "Could not open/create database", FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, "Could not open/create database", FLAT_STORE_E_CANNOTOPEN);
 		perror("backend_dbms_open");
 		fprintf(stderr, "Could not open/create '%s': %s\n", me->filename, backend_dbms_get_error(me));
 		_my_free(me);
@@ -346,9 +348,9 @@ backend_dbms_fetch(
 	};
 
 	if (retval == 1) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 		return FLAT_STORE_E_NOTFOUND;
-	};
+		};
 
 	/* to duplicate rertun value */
 
@@ -399,13 +401,13 @@ backend_dbms_store(
 	};
 	if (retval != 0) {
 		if (retval == 1) {
-			backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+			backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_KEYEXIST);
 			return FLAT_STORE_E_KEYEXIST;
 		} else {
-			backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+			backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 			perror("backend_dbms_store");
 			fprintf(stderr, "Could not store '%s': %s = %s\n", me->filename, (char *) key.data, (char *) val.data);
-			return FLAT_STORE_E_DBMS;
+			return FLAT_STORE_E_NOTFOUND;
 		};
 	};
 
@@ -452,6 +454,10 @@ backend_dbms_exists(
 		fprintf(stderr, "Could not exists '%s': %s\n", me->filename, (char *) key.data);
 		return FLAT_STORE_E_DBMS;
 	};
+	if (retval == 1) {
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
+		return FLAT_STORE_E_NOTFOUND;
+		};
 	return retval;
 };
 
@@ -476,11 +482,9 @@ backend_dbms_delete(
 	};
 
 	if (retval != 0) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
-		perror("backend_dbms_delete");
-		fprintf(stderr, "Could not delete '%s': %s\n", me->filename, (char *) key.data);
-		return FLAT_STORE_E_DBMS;
-	};
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
+		return FLAT_STORE_E_NOTFOUND;
+		};
 	return retval;
 };
 
@@ -498,6 +502,7 @@ backend_dbms_clear(
 	me->num_dec = 0;
 	me->num_sync = 0;
 	me->num_next = 0;
+	me->num_from = 0;
 	me->num_first = 0;
 	me->num_delete = 0;
 	me->num_exists = 0;
@@ -512,6 +517,34 @@ backend_dbms_clear(
 		fprintf(stderr, "Could not clear '%s'\n", me->filename);
 		return FLAT_STORE_E_DBMS;
 	};
+	return retval;
+};
+
+rdfstore_flat_store_error_t
+backend_dbms_from(
+		   void *eme,
+		   DBT   closest_key,
+		   DBT * key
+)
+{
+	dbms_store_t   *me = (dbms_store_t *) eme;
+	int             retval;
+
+#ifdef RDFSTORE_FLAT_STORE_DEBUG
+	fprintf(stderr, "backend_dbms_from num=%d from '%s'\n", ++(me->num_from), me->filename);
+#endif
+
+	if (dbms_comms(me->dbms, TOKEN_FROM, &retval, &closest_key, NULL, key, NULL)) {
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		perror("backend_dbms_from");
+		fprintf(stderr, "Could not from '%s'\n", me->filename);
+		return FLAT_STORE_E_DBMS;
+	};
+
+	if (retval == 1) {
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
+		return FLAT_STORE_E_NOTFOUND;
+		};
 	return retval;
 };
 
@@ -536,9 +569,9 @@ backend_dbms_first(
 	};
 
 	if (retval == 1) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 		return FLAT_STORE_E_NOTFOUND;
-	};
+		};
 	return retval;
 };
 
@@ -564,9 +597,9 @@ backend_dbms_next(
 	};
 
 	if (retval == 1) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 		return FLAT_STORE_E_NOTFOUND;
-	};
+		};
 	return retval;
 };
 
@@ -593,9 +626,9 @@ backend_dbms_inc(
 	};
 
 	if (retval == 1) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 		return FLAT_STORE_E_NOTFOUND;
-	};
+		};
 	return retval;
 }
 
@@ -622,9 +655,9 @@ backend_dbms_dec(
 	};
 
 	if (retval == 1) {
-		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_DBMS);
+		backend_dbms_set_error(me, dbms_get_error(me->dbms), FLAT_STORE_E_NOTFOUND);
 		return FLAT_STORE_E_NOTFOUND;
-	};
+		};
 	return retval;
 }
 

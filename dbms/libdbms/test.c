@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -43,7 +43,7 @@ static void _err(char * msg, int erx)
 
 int main(int argc, char * * argv) 
 {
-	dbms * d = dbms_connect( "test", NULL, 0, DBMS_XSMODE_DROP, NULL, NULL, &_note, &_err);
+	dbms * d = dbms_connect( "test", NULL, 0, DBMS_XSMODE_DROP, NULL, NULL, &_note, &_err, 0);
 	dbms_error_t e;
 
 	if (!d) {

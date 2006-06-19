@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -12,6 +12,8 @@
 # *
 # * Changes:
 # *     version 0.1 - Tue Jan 28 15:30:00 CET 2003
+# *     version 0.2
+# *     	- fixed bug when model context is set
 # *
 
 package RDFStore::Serializer::RDFXML;
@@ -19,7 +21,7 @@ package RDFStore::Serializer::RDFXML;
 use vars qw ($VERSION);
 use strict;
  
-$VERSION = '0.1';
+$VERSION = '0.2';
 
 use Carp;
 
@@ -40,6 +42,10 @@ sub write {
 
 	$model = $class->{'model'}
 		unless($model);
+
+	# ignore model its context while dumping
+	my $ctx = $model->getContext();
+	$model->resetContext();
 
 	# init
 	$class->SUPER::write( $model, $fh, $namespaces );
@@ -79,6 +85,10 @@ sub write {
 	$class->printContent( "\n</" .    $class->getNamespacePrefix($RDFStore::Vocabulary::RDF::_Namespace) . ":RDF>" );
 
 	$class->{subjects_done} = {};
+
+	# restore context
+	$model->setContext( $ctx )
+		if($ctx);
 
         return $class->returnContent;
 	};

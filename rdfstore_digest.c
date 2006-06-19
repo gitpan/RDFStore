@@ -1,5 +1,5 @@
 /*
- * 	Copyright (c) 2000-2004 All rights reserved
+ * 	Copyright (c) 2000-2006 All rights reserved
  * 	Alberto Reggiori <areggiori@webweaving.org>
  *	Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
@@ -60,7 +60,7 @@
  * by Dirk-Willem van Gulik for Web Weaving Internet Engineering m/v Enschede,
  * The Netherlands.
  *
- * $Id: rdfstore_digest.c,v 1.11 2004/08/19 18:57:13 areggiori Exp $
+ * $Id: rdfstore_digest.c,v 1.12 2006/06/19 10:10:21 areggiori Exp $
  *
  */
 

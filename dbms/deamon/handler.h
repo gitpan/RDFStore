@@ -1,5 +1,5 @@
 /*
- *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+ *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
  *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
  *
  * NOTICE
@@ -11,7 +11,7 @@
  *     http://rdfstore.sourceforge.net/LICENSE
  *
  *
- * $Id: handler.h,v 1.3 2004/08/19 18:57:36 areggiori Exp $
+ * $Id: handler.h,v 1.4 2006/06/19 10:10:22 areggiori Exp $
  */ 
 
 void close_all_dbps();

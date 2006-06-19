@@ -1,5 +1,5 @@
 # *
-# *	Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *	Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *	                   Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -11,7 +11,7 @@
 # *     http://rdfstore.sourceforge.net/LICENSE
 # *
 # *
-# *	$Id: Makefile.PL,v 1.55 2004/08/19 19:20:01 areggiori Exp $
+# *	$Id: Makefile.PL,v 1.61 2006/06/19 10:10:21 areggiori Exp $
 
 use strict;
 use ExtUtils::MakeMaker 5.16 qw(WriteMakefile prompt);
@@ -83,7 +83,7 @@ my ($LIB_DIR,$INC_DIR,$DB_NAME,$LIBS,$COMPAT185,$DB,$DBMS_INSTDIR);
 
 # check BerkeleyDB library locals: read arch_conf.in, pick up any from %ENV if possible otheriwse prompt the user
 # parse configuration file
-my %options = map { $_, 1 } qw( INCLUDE LIB DBNAME DBMS_INSTDIR );
+my %options = map { $_, 1 } qw( INCLUDE LIB DBNAME DBMS_INSTDIR RDFSTORE_WORD_STEMMING RDFSTORE_MAXRECORDS );
 my $conf_file = 'arch_conf.in';
 open(CONF, $conf_file) 
 	or die "Cannot open file $conf_file: $!\n" ;
@@ -119,11 +119,32 @@ if(exists $options{'DBMS_INSTDIR'} and -e $options{'DBMS_INSTDIR'} and -d _ ) {
 	$DBMS_INSTDIR = '/RDFStore';
 	};
 
+#other specific options either from enviornment or arch_conf.in
+my ($RDFSTORE_WORD_STEMMING,$RDFSTORE_MAXRECORDS);
+$RDFSTORE_WORD_STEMMING = $ENV{'RDFSTORE_WORD_STEMMING'}
+	if(defined $ENV{'RDFSTORE_WORD_STEMMING'});
+$RDFSTORE_WORD_STEMMING = $options{'RDFSTORE_WORD_STEMMING'}
+	if(exists $options{'RDFSTORE_WORD_STEMMING'});
+
+my $RDFSTORE_DEFAULT_MAXRECORDS=2097152;
+my $RDFSTORE_MIN_MAXRECORDS=128;
+my $RDFSTORE_MAX_MAXRECORDS=60000000; # 60M triples
+$RDFSTORE_MAXRECORDS = (	$ENV{'RDFSTORE_MAXRECORDS'} >= $RDFSTORE_MIN_MAXRECORDS and 
+				$ENV{'RDFSTORE_MAXRECORDS'} <= $RDFSTORE_MAX_MAXRECORDS ) ? 
+				$ENV{'RDFSTORE_MAXRECORDS'} :
+				$RDFSTORE_DEFAULT_MAXRECORDS
+	if(defined $ENV{'RDFSTORE_MAXRECORDS'});
+$RDFSTORE_MAXRECORDS = (	$options{'RDFSTORE_MAXRECORDS'} >= $RDFSTORE_MIN_MAXRECORDS and 
+				$options{'RDFSTORE_MAXRECORDS'} <= $RDFSTORE_MAX_MAXRECORDS ) ? 
+				$options{'RDFSTORE_MAXRECORDS'} :
+				$RDFSTORE_DEFAULT_MAXRECORDS
+	if(exists $options{'RDFSTORE_MAXRECORDS'});
+
 # eventually go in interactive mode
 if($ARGV[0] =~ m/-(i|interactive)/i) {
 	print <<QUESTION;
 You have chosen the interactive configuration - You will be now asked a few questions about
-your local BerkeleyDB installation (see arch_conf.in for more info)
+your local BerkeleyDB installation and other RDF storage and indexing specific parameters (see arch_conf.in for more info)
 
 QUESTION
 
@@ -158,6 +179,22 @@ QUESTION
 		$DB_NAME = $dbn;
 		};
 
+	my $ws = prompt( 'How many characters your need word stemming on RDF text literals (an integer - default value is 5 ) ? '.( (defined $RDFSTORE_WORD_STEMMING) ? '['.$RDFSTORE_WORD_STEMMING.']' : '' ) );
+	if(	(defined $ws) &&
+		($ws ne '') &&
+		(int($ws)) ) {
+		$RDFSTORE_WORD_STEMMING = $ws;
+		};
+
+	my $mrs = prompt( 'How many RDF triples your database can contain (an integer in the range '.$RDFSTORE_MIN_MAXRECORDS.' <= X <= '.$RDFSTORE_MAX_MAXRECORDS.') ? '.( (defined $RDFSTORE_MAXRECORDS) ? '['.$RDFSTORE_MAXRECORDS.']' : '' ) );
+	if(	(defined $mrs) &&
+		($mrs ne '') &&
+		(int($mrs)) &&
+		( $mrs >= $RDFSTORE_MIN_MAXRECORDS ) &&
+		( $mrs <= $RDFSTORE_MAX_MAXRECORDS ) ) {
+		$RDFSTORE_MAXRECORDS = $mrs;
+		};
+
 	print "\n";
 	};
 
@@ -167,7 +204,17 @@ if ( $^O =~ m/linux/ and ($ARGV[0] !~ m/-(i|interactive)/i) ) {
 	if ( -e '/usr/include/db4/db.h' ) {
        		$DB = '-DDB4_INCLUDE';
 		unless($DB_NAME) {
-			$DB_NAME = '-ldb4';
+			# let's guess what the bloody Linux installation/distro did!
+			my @dbs = </usr/lib/libdb4.>;
+			if( $#dbs >= 0 ) {
+				$DB_NAME = '-ldb4';
+				};
+			@dbs = </usr/lib/libdb-4.0.>;
+			if( $#dbs >= 0 ) {
+				$DB_NAME = '-ldb-4.0';
+			} else {
+				$DB_NAME = '-ldb';
+				};
 			$LIBS = $DB_NAME;
 			};
 		$INC_DIR = '/usr/include/db4/' unless($INC_DIR);
@@ -175,7 +222,17 @@ if ( $^O =~ m/linux/ and ($ARGV[0] !~ m/-(i|interactive)/i) ) {
 	if ( -e '/usr/include/db3/db.h' ) {
        		$DB = '-DDB3_INCLUDE';
 		unless($DB_NAME) {
-			$DB_NAME = '-ldb3';
+			# let's guess what the bloody Linux installation/distro did!
+                        my @dbs = </usr/lib/libdb3.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb3';
+                                };
+                        @dbs = </usr/lib/libdb-3.0.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb-3.0';
+                        } else {
+                                $DB_NAME = '-ldb';
+                                };
 			$LIBS = $DB_NAME;
 			};
 		$INC_DIR = '/usr/include/db3/' unless($INC_DIR);
@@ -183,7 +240,17 @@ if ( $^O =~ m/linux/ and ($ARGV[0] !~ m/-(i|interactive)/i) ) {
 	if ( -e '/usr/include/db2/db.h' ) {
        		$DB = '-DDB2_INCLUDE';
 		unless($DB_NAME) {
-			$DB_NAME = '-ldb2';
+			# let's guess what the bloody Linux installation/distro did!
+                        my @dbs = </usr/lib/libdb2.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb2';
+                                };
+                        @dbs = </usr/lib/libdb-2.0.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb-2.0';
+                        } else {
+                                $DB_NAME = '-ldb';
+                                };
 			$LIBS = $DB_NAME;
 			};
 		$INC_DIR = '/usr/include/db2/' unless($INC_DIR);
@@ -191,7 +258,17 @@ if ( $^O =~ m/linux/ and ($ARGV[0] !~ m/-(i|interactive)/i) ) {
 	if ( -e '/usr/include/db1/db.h' ) {
        		$DB = '-DDB1_INCLUDE';
 		unless($DB_NAME) {
-			$DB_NAME = '-ldb1';
+			# let's guess what the bloody Linux installation/distro did!
+                        my @dbs = </usr/lib/libdb1.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb1';
+                                };
+                        @dbs = </usr/lib/libdb-1.0.>;
+                        if( $#dbs >= 0 ) {
+                                $DB_NAME = '-ldb-1.0';
+                        } else {
+                                $DB_NAME = '-ldb';
+                                };
 			$LIBS = $DB_NAME;
 			};
 		$INC_DIR = '/usr/include/db1/' unless($INC_DIR);
@@ -206,9 +283,13 @@ if(	($ARGV[0] =~ m/-(v|verbose)/i) ||
 	($ARGV[1] =~ m/-(v|verbose)/i) ||
 	($ARGV[0] =~ m/-(i|interactive)/i) ) {
 	print "Your configuration is the following:\n\n";
-	print "\tBerkeleyDB include directory     [".( (defined $INC_DIR) ? $INC_DIR : 'undefined/default to built in' )."]\n";
-	print "\tBerkeleyDB library directory     [".( (defined $LIB_DIR) ? $LIB_DIR : 'undefined/default to built in' )."]\n";
-	print "\tBerkeleyDB library name          [".( (defined $DB_NAME) ? $DB_NAME : 'undefined/default to built in' )."]\n\n";
+	print "BerkeleyDB configuration:\n\n";
+	print "\tinclude directory          [".( (defined $INC_DIR) ? $INC_DIR : 'undefined/default to built in' )."]\n";
+	print "\tlibrary directory          [".( (defined $LIB_DIR) ? $LIB_DIR : 'undefined/default to built in' )."]\n";
+	print "\tlibrary name               [".( (defined $DB_NAME) ? $DB_NAME : 'undefined/default to built in' )."]\n\n";
+	print "RDF storage and indexing configuration:\n\n";
+	print "\tRDF literal word stemming up to       [$RDFSTORE_WORD_STEMMING]\n";
+	print "\tMax number of RDF statements/triples  [$RDFSTORE_MAXRECORDS]\n\n";
 	};
 
 my $debug = ($ENV{RDFSTORE_DEBUG} =~ m/1|yes|on|enable/) ? '-DRDFSTORE_DEBUG' : '';
@@ -218,11 +299,16 @@ my $dbms_debug_malloc = ($ENV{RDFSTORE_DBMS_DEBUG_MALLOC} =~ m/1|yes|on|enable/)
 my $flat_store_debug = ($ENV{RDFSTORE_FLAT_STORE_DEBUG} =~ m/1|yes|on|enable/) ? '-DRDFSTORE_FLAT_STORE_DEBUG' : '';
 my $profile = ($ENV{RDFSTORE_PROFILE} =~ m/1|yes|on|enable/) ? 1 : 0;
 
+my $RDFSTORE_OPTIONS = ' -DRDFSTORE_WORD_STEMMING='.$RDFSTORE_WORD_STEMMING
+	if(defined $RDFSTORE_WORD_STEMMING);
+$RDFSTORE_OPTIONS .= ' -DRDFSTORE_MAXRECORDS='.$RDFSTORE_MAXRECORDS
+	if(defined $RDFSTORE_MAXRECORDS);
+
 # generate dbms/arch.conf
 open(ARCH_CONF,">dbms/arch.conf"); #overwrite existing one
 print ARCH_CONF <<EOT;
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori  <areggiori\@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori  <areggiori\@webweaving.org>
 # *     		        Dirk-Willem van Gulik <dirkx\@webweaving.org>
 # *
 # * NOTICE
@@ -244,7 +330,7 @@ RANLIB = ranlib
 LINT = lint
 LINTFLAGS = -chapbx
 
-INCLUDES= -I../include 
+INCLUDES= -I../include -I../../include
 
 DEFINES += $PLATFORM
 
@@ -254,7 +340,7 @@ EOT
 print ARCH_CONF "\n# add the include directory of your BDB installation is if not found to the bottom line\n";
 print ARCH_CONF ($INC_DIR) ? 'INCLUDES += -I'.$INC_DIR : '#INCLUDES += -I/usr/local/BerkeleyDB-4.0.14/include';
 print ARCH_CONF "\n\n# add the library directory of your BDB installation is if not found to the bottom line\n";
-print ARCH_CONF ( ($LIB_DIR) ? 'LIBS_DIR  = -L'.$LIB_DIR : '#LIBS_DIR = -L/usr/local/BerkeleyDB-4.0.14/lib' ) . "\n";
+print ARCH_CONF 'LIBS_DIR  = -L../libdbms ' . ( ($LIB_DIR) ? ' -L'.$LIB_DIR : ' # -L/usr/local/BerkeleyDB-4.0.14/lib' ) . "\n";
 print ARCH_CONF ( ($LIB_DIR) ? 'BDB_LD_LIBS_DIR  = '.$LIB_DIR : '#BDB_LD_LIBS_DIR = /usr/local/BerkeleyDB-4.0.14/lib' ) . "\n";
 print ARCH_CONF <<EOT;
 
@@ -375,7 +461,7 @@ open(DBMSDSH,">dbms/utils/dbmsd.sh"); #overwrite existing one
 print DBMSDSH <<EOT;
 #!/bin/sh
 ##############################################################################
-#       Copyright (c) 2000-2004 All rights reserved
+#       Copyright (c) 2000-2006 All rights reserved
 #       Alberto Reggiori <areggiori\@webweaving.org>
 #       Dirk-Willem van Gulik <dirkx\@webweaving.org>
 #
@@ -471,7 +557,7 @@ open(DBMSDSTART,">dbms/utils/start_dbserver");
 print DBMSDSTART <<EOT;
 #!/bin/sh
 ##############################################################################
-#       Copyright (c) 2000-2004 All rights reserved
+#       Copyright (c) 2000-2006 All rights reserved
 #       Alberto Reggiori <areggiori\@webweaving.org>
 #       Dirk-Willem van Gulik <dirkx\@webweaving.org>
 #
@@ -544,7 +630,7 @@ open(DBMSDSTOP,">dbms/utils/stop_dbserver");
 print DBMSDSTOP <<EOT;
 #!/bin/sh
 ##############################################################################
-#       Copyright (c) 2000-2004 All rights reserved
+#       Copyright (c) 2000-2006 All rights reserved
 #       Alberto Reggiori <areggiori\@webweaving.org>
 #       Dirk-Willem van Gulik <dirkx\@webweaving.org>
 #
@@ -646,7 +732,7 @@ close(DBMSDSTOP);
 open(UTILSMAKE,">utils/Makefile"); #overwrite existing one
 print UTILSMAKE <<EOT;
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori\@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori\@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx\@webweaving.org>
 # *
 # * NOTICE
@@ -662,7 +748,7 @@ TFILE=`date +%Y-%m-%d`
 
 include ../dbms/arch.conf
 
-OBJS = ../dbms/libdbms/libdbms.o ../rdfstore_flat_store.o ../rdfstore_kernel.o ../rdfstore_bits.o ../rdfstore_utf8.o ../rdfstore_digest.o ../rdfstore_ap_sha1.o ../rdfstore_compress.o ../rdfstore_log.o ../rdfstore_serializer.o ../rdfstore_iterator.o ../sflcomp.o ../my_compress.o ../fraenkel_compress.o ../backend_bdb_store.o ../backend_dbms_store.o ../backend_caching_store.o
+OBJS = ../dbms/libdbms/libdbms.o ../rdfstore_flat_store.o ../rdfstore_kernel.o ../rdfstore_bits.o ../rdfstore_utf8.o ../rdfstore_xsd.o ../rdfstore_digest.o ../rdfstore_ap_sha1.o ../rdfstore_compress.o ../rdfstore_log.o ../rdfstore_serializer.o ../rdfstore_iterator.o ../sflcomp.o ../my_compress.o ../fraenkel_compress.o ../backend_bdb_store.o ../backend_dbms_store.o ../backend_caching_store.o
 
 all:	db_stats
 
@@ -678,7 +764,7 @@ close(UTILSMAKE);
 open(TESTSMAKE,">test/Makefile"); #overwrite existing one
 print TESTSMAKE <<EOT;
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori\@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori\@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx\@webweaving.org>
 # *
 # * NOTICE
@@ -694,7 +780,7 @@ TFILE=`date +%Y-%m-%d`
 
 include ../dbms/arch.conf
 
-OBJS = ../dbms/libdbms/libdbms.o ../rdfstore_flat_store.o ../rdfstore_kernel.o ../rdfstore_bits.o ../rdfstore_utf8.o ../rdfstore_digest.o ../rdfstore_ap_sha1.o ../rdfstore_compress.o ../rdfstore_log.o ../rdfstore_iterator.o  ../rdfstore_serializer.o ../sflcomp.o ../my_compress.o ../fraenkel_compress.o ../backend_bdb_store.o ../backend_dbms_store.o ../backend_caching_store.o
+OBJS = ../dbms/libdbms/libdbms.o ../rdfstore_flat_store.o ../rdfstore_kernel.o ../rdfstore_bits.o ../rdfstore_utf8.o ../rdfstore_xsd.o ../rdfstore_digest.o ../rdfstore_ap_sha1.o ../rdfstore_compress.o ../rdfstore_log.o ../rdfstore_iterator.o  ../rdfstore_serializer.o ../sflcomp.o ../my_compress.o ../fraenkel_compress.o ../backend_bdb_store.o ../backend_dbms_store.o ../backend_caching_store.o
 
 
 all:	mytest mytest1 myingest
@@ -742,14 +828,14 @@ WriteMakefile(
 	LIBS            => [ ( (defined $LIB_DIR) ? '-L'.$LIB_DIR : '' ) . " $LIBS -Ldbms/libdbms -ldbms "],
 	XSPROTOARG      => '-noprototypes',
 	OPTIMIZE        => '-g',
-	DEFINE          => ( ($profile) ? '-pg ' : '' )." $PLATFORM $debug $debug_malloc $dbms_debug $dbms_debug_malloc $flat_store_debug -D_NOT_CORE $DB $COMPAT185 -DSTATIC_BUFF -DSTATIC_CS_BUFF -DSTATIC_SC_BUFF",
-        LDFROM    => q[RDFStore$(OBJ_EXT) rdfstore_log$(OBJ_EXT) rdfstore_compress$(OBJ_EXT) rdfstore_flat_store$(OBJ_EXT) rdfstore_iterator$(OBJ_EXT) rdfstore_serializer$(OBJ_EXT) rdfstore_kernel$(OBJ_EXT) rdfstore_ap_sha1$(OBJ_EXT) rdfstore_digest$(OBJ_EXT) rdfstore_bits$(OBJ_EXT) rdfstore_utf8$(OBJ_EXT) sflcomp$(OBJ_EXT) my_compress$(OBJ_EXT) fraenkel_compress$(OBJ_EXT) backend_bdb_store$(OBJ_EXT) backend_dbms_store$(OBJ_EXT) backend_caching_store$(OBJ_EXT)],
-        OBJECT    => q[RDFStore$(OBJ_EXT) rdfstore_log$(OBJ_EXT) rdfstore_compress$(OBJ_EXT) rdfstore_flat_store$(OBJ_EXT) rdfstore_iterator$(OBJ_EXT) rdfstore_serializer$(OBJ_EXT) rdfstore_kernel$(OBJ_EXT) rdfstore_ap_sha1$(OBJ_EXT) rdfstore_digest$(OBJ_EXT) rdfstore_bits$(OBJ_EXT) rdfstore_utf8$(OBJ_EXT) my_compress$(OBJ_EXT) sflcomp$(OBJ_EXT) fraenkel_compress$(OBJ_EXT) backend_bdb_store$(OBJ_EXT) backend_dbms_store$(OBJ_EXT) backend_caching_store$(OBJ_EXT) ],
+	DEFINE          => ( ($profile) ? '-pg ' : '' )." $PLATFORM $debug $debug_malloc $dbms_debug $dbms_debug_malloc $flat_store_debug -D_NOT_CORE $DB $COMPAT185 -DSTATIC_BUFF -DSTATIC_CS_BUFF -DSTATIC_SC_BUFF $RDFSTORE_OPTIONS",
+        LDFROM    => q[RDFStore$(OBJ_EXT) rdfstore_log$(OBJ_EXT) rdfstore_compress$(OBJ_EXT) rdfstore_flat_store$(OBJ_EXT) rdfstore_iterator$(OBJ_EXT) rdfstore_serializer$(OBJ_EXT) rdfstore_kernel$(OBJ_EXT) rdfstore_ap_sha1$(OBJ_EXT) rdfstore_digest$(OBJ_EXT) rdfstore_bits$(OBJ_EXT) rdfstore_utf8$(OBJ_EXT) rdfstore_xsd$(OBJ_EXT) sflcomp$(OBJ_EXT) my_compress$(OBJ_EXT) fraenkel_compress$(OBJ_EXT) backend_bdb_store$(OBJ_EXT) backend_dbms_store$(OBJ_EXT) backend_caching_store$(OBJ_EXT)],
+        OBJECT    => q[RDFStore$(OBJ_EXT) rdfstore_log$(OBJ_EXT) rdfstore_compress$(OBJ_EXT) rdfstore_flat_store$(OBJ_EXT) rdfstore_iterator$(OBJ_EXT) rdfstore_serializer$(OBJ_EXT) rdfstore_kernel$(OBJ_EXT) rdfstore_ap_sha1$(OBJ_EXT) rdfstore_digest$(OBJ_EXT) rdfstore_bits$(OBJ_EXT) rdfstore_utf8$(OBJ_EXT) rdfstore_xsd$(OBJ_EXT) my_compress$(OBJ_EXT) sflcomp$(OBJ_EXT) fraenkel_compress$(OBJ_EXT) backend_bdb_store$(OBJ_EXT) backend_dbms_store$(OBJ_EXT) backend_caching_store$(OBJ_EXT) ],
     	'clean'     => { FILES => "y.tab.o lex.yy.o *.db" },
 	EXE_FILES    => [ "utils/rdf.pl", "utils/rdfquery.pl", "utils/rdfdump.pl" ],
 	($] ge '5.005') ? (
                                'AUTHOR' => 'Alberto Reggiori <areggiori@webweaving.org>, Dirk-Willem van Gulik <dirkx@webweaving.org>',
-                               'ABSTRACT' => 'RDF storage Perl library',
+                               'ABSTRACT' => 'Perl/C RDF storage and API',
                            ) : ()
 );
 

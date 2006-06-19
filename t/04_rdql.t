@@ -88,6 +88,10 @@ WHERE
 	(?item, <rss::title>, %"February"% ),
 	(?item, <rss::title>, ?title ),
 	(?item, <rss::link>, ?link)
+#ORDER BY ( ?title =~ m/1/ )
+ORDER BY ?title
+LIMIT 10 
+OFFSET 0
 USING
 	rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>,
 	rss for <http://purl.org/rss/1.0/>
@@ -114,7 +118,7 @@ WHERE
 	(?item, <rss::title>, ?title),
 	(?item, <rss::link>, ?link)
 AND 
-        ?title LIKE '/(4 February)/i'
+        ?title LIKE /(4 February)/i
 USING
 	rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>,
 	rss for <http://purl.org/rss/1.0/>
@@ -400,7 +404,7 @@ WHERE
 (?x, <rdf:type>, <rss:item>),
 (?x, <rss::title>, ?title),
 (?x, <rss::link>, ?link)
-AND ?title LIKE '/incombe/i'
+AND ?title LIKE /incombe/i
 USING
 rss for <http://purl.org/rss/1.0/>,
 rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -468,7 +472,7 @@ while (my @row = $query->fetchrow_array()) {
 	};
 };
 ok $tt++, !$@;
-ok $tt++, (0 == $kk);
+ok $tt++, (19 == $kk);
 ok $tt++, $query->finish();
 
 # test context/statement grouping RDQL support
@@ -478,7 +482,7 @@ my $now='now'.time;
 my $p=new RDFStore::Parser::SiRPAC(
 		Style => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory =>          $factory,
-                store   => { options => { FreeText => 1, Context => $factory->createResource($now) } }
+                style_options   => { store_options => { FreeText => 1, Context => $factory->createResource($now) } }
                 );
 my $model = $p->parsefile("file:t/rdql-tests/rdf/lastampaEconomia.rdf");
 
@@ -489,7 +493,7 @@ WHERE
 (?x, <rdf:type>, <rss:item>, <$now>),
 (?x, <rss::title>, ?title, <$now>),
 (?x, <rss::link>, ?link, <$now>)
-AND ?title LIKE '/incombe/i'
+AND ?title LIKE /incombe/i
 USING
 rss for <http://purl.org/rss/1.0/>,
 rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -514,7 +518,7 @@ my $context='urn:rdf:magic:context:12345_ertoiororr';
 my $rdf_parser=new RDFStore::Parser::SiRPAC(
 		Style => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory =>          $factory,
-                store   => { options => { FreeText => 1, Context => $factory->createResource($context) } }
+                style_options   => { store_options => { FreeText => 1, Context => $factory->createResource($context) } }
                 );
 $model = $rdf_parser->parsefile("file:t/rdql-tests/rdf/lastampaEconomia.rdf");
 
@@ -525,7 +529,7 @@ WHERE
 (?x, <rdf:type>, <rss:item>, <$context>),
 (?x, <rss::title>, ?title, <$context>),
 (?x, <rss::link>, ?link, <$context>)
-AND ?title LIKE '/incombe/i'
+AND ?title LIKE /incombe/i
 USING
 rss for <http://purl.org/rss/1.0/>,
 rdf for <http://www.w3.org/1999/02/22-rdf-syntax-ns#>

@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *     		   Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -77,6 +77,7 @@ install: dbmsd man dbmscheckconf dbms.conf
 	$(INSTALL) -m 0555 -o $(UID) -g $(GID) ../utils/dbmsd.sh $(INSTDIR)/rc
 	$(INSTALL) -m 0555 -o $(UID) -g $(GID) ../utils/start_dbserver $(INSTDIR)/rc
 	$(INSTALL) -m 0555 -o $(UID) -g $(GID) ../utils/stop_dbserver $(INSTDIR)/rc
+	$(INSTALL) -m 0555 -o $(UID) -g $(GID) ../utils/dbms_mirror.pl $(INSTDIR)/bin
 	$(INSTALL) -m 0644 -o $(UID) -g $(GID) dbmsd.8.gz $(INSTDIR)/man/man8
 	$(INSTALL) -m 0644 -o $(UID) -g $(GID) dbmscheckconf.8.gz $(INSTDIR)/man/man8
 

@@ -5,7 +5,7 @@ use DBMS;
 
 for my $a (1..2) {
 
-tie %a,DBMS,'biggie',&DBMS::XSMODE_CREAT and print "ok\n" or die "could not connect $!";
+tie %a,DBMS,'biggie',&DBMS::XSMODE_CREAT,0 and print "ok\n" or die "could not connect $!";
 %a=();
 $last_a=$last='';
 for $i ( 1 .. 100 ) {

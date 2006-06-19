@@ -7,7 +7,7 @@ use DBMS;
 no strict;
 
 foreach $db (1 .. 5) {
-my $a=tie %aap, 'DBMS','zappazoink'.$db,&DBMS::XSMODE_CREAT 
+my $a=tie %aap, 'DBMS','zappazoink'.$db,&DBMS::XSMODE_CREAT,0
 	or print "not ok\n";
 
 for $i (1..$N) {

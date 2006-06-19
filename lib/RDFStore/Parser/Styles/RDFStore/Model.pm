@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -46,18 +46,18 @@ sub Init {
     my $expat = shift;
 
 	my $context;
-	if(	(exists $expat->{'store'}->{'options'}->{'Context'}) &&
-		(ref($expat->{'store'}->{'options'}->{'Context'})) &&
-		($expat->{'store'}->{'options'}->{'Context'}->isa("RDFStore::Resource")) ) {
-		$context = $expat->{'store'}->{'options'}->{'Context'};
-		delete($expat->{'store'}->{'options'}->{'Context'});
+	if(	(exists $expat->{'style_options'}->{'store_options'}->{'Context'}) &&
+		(ref($expat->{'style_options'}->{'store_options'}->{'Context'})) &&
+		($expat->{'style_options'}->{'store_options'}->{'Context'}->isa("RDFStore::Resource")) ) {
+		$context = $expat->{'style_options'}->{'store_options'}->{'Context'};
+		delete($expat->{'style_options'}->{'store_options'}->{'Context'});
 		};
 
-	if(	(exists $expat->{'store'}->{'delete'}) &&
-		(defined $expat->{'store'}->{'delete'}) ) {
-		my $storename = $expat->{'store'}->{'options'}->{'Name'};
+	if(	(exists $expat->{'style_options'}->{'delete'}) &&
+		(defined $expat->{'style_options'}->{'delete'}) ) {
+		my $storename = $expat->{'style_options'}->{'store_options'}->{'Name'};
 		my $in_context = ($context) ? " in context '".$context->toString."'" : '';
-		my $yes = ( ($expat->{'store'}->{'confirm'}) && ($expat->{'store'}->{'confirm'} =~ m/1|yes|on/) ) ? 1 : 0;
+		my $yes = ( ($expat->{'style_options'}->{'confirm'}) && ($expat->{'style_options'}->{'confirm'} =~ m/1|yes|on/) ) ? 1 : 0;
 		confirm("\n*WARNINIG* This operation can not be undone!!\n\nAre you sure you want to remove statements from '$storename' database$in_context? (^C to kill, any key to continue)\n\n")
 			unless($yes);
 		};
@@ -65,15 +65,15 @@ sub Init {
 
 	# take an existing model if passed
 	my $not_override = (exists $expat->{'RDFStore_model'}) ? 1 : 0 ;
-	if(     (exists $expat->{'store'}->{'options'}->{'sourceModel'}) &&
-                (ref($expat->{'store'}->{'options'}->{'sourceModel'})) &&
-                ($expat->{'store'}->{'options'}->{'sourceModel'}->isa("RDFStore::Model")) ) {
-		$expat->{'RDFStore_model'} = $expat->{'store'}->{'options'}->{'sourceModel'}
+	if(     (exists $expat->{'style_options'}->{'store_options'}->{'sourceModel'}) &&
+                (ref($expat->{'style_options'}->{'store_options'}->{'sourceModel'})) &&
+                ($expat->{'style_options'}->{'store_options'}->{'sourceModel'}->isa("RDFStore::Model")) ) {
+		$expat->{'RDFStore_model'} = $expat->{'style_options'}->{'store_options'}->{'sourceModel'}
 			unless($not_override);
 	} else {
 		$expat->{'RDFStore_model'} = new RDFStore::Model( 
 					nodeFactory => $expat->{'NodeFactory'}, 
-					%{$expat->{'store'}->{'options'}} )
+					%{$expat->{'style_options'}->{'store_options'}} )
 			unless($not_override);
 		};
 
@@ -102,23 +102,23 @@ sub Final {
 sub Assert {
 	my ($expat,$st) = @_;
 
-	if(	(exists $expat->{'store'}->{'delete'}) &&
-		(defined $expat->{'store'}->{'delete'}) ) {
+	if(	(exists $expat->{'style_options'}->{'delete'}) &&
+		(defined $expat->{'style_options'}->{'delete'}) ) {
 		# problem is wiht contexts now....when are we going to zap the context specific triples now?????
 		if($expat->{'RDFStore_model'}->remove($st)) {
 			# we should print just the new ones
 			print "Removed statement ".$st->toString,"\n"
-				if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Statement")) && (defined $expat->{'store'}->{'seevalues'}) );
+				if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Statement")) && (defined $expat->{'style_options'}->{'seevalues'}) );
 			};
 	} else {
 		if($expat->{'RDFStore_model'}->add($st)) {
 			# we should print just the new ones
 			print "Added statement ".$st->toString,"\n"
-				if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Statement")) && (defined $expat->{'store'}->{'seevalues'}) );
+				if( (defined $st) && (ref($st)) && ($st->isa("RDFStore::Statement")) && (defined $expat->{'style_options'}->{'seevalues'}) );
 			};
 		};
 
-	if(	(defined $expat->{'store'}->{'owl:imports'}) &&
+	if(	(defined $expat->{'style_options'}->{'owl:imports'}) &&
 		($st->predicate->equals($RDFStore::Vocabulary::OWL::imports)) && #take any in it
 		($st->object->toString ne $expat->{'Source'}) && #try to avoid recursion :)
 		(! exists $expat->{'imports'}->{ $st->object->toString } ) ) {
@@ -130,11 +130,11 @@ sub Assert {
                                 NodeFactory => $expat->{'RDFStore_model'}->getNodeFactory,
                                 Source  => $st->object->toString,
 				store => {
-					'seevalues' => $expat->{'store'}->{'seevalues'},
-					'delete' => (     (exists $expat->{'store'}->{'delete'}) &&
-							(defined $expat->{'store'}->{'delete'}) ) ? $expat->{'store'}->{'delete'} : undef,
-					'confirm' => (    (exists $expat->{'store'}->{'confirm'}) &&
-							(defined $expat->{'store'}->{'confirm'}) ) ? $expat->{'store'}->{'confirm'} : undef
+					'seevalues' => $expat->{'style_options'}->{'seevalues'},
+					'delete' => (     (exists $expat->{'style_options'}->{'delete'}) &&
+							(defined $expat->{'style_options'}->{'delete'}) ) ? $expat->{'style_options'}->{'delete'} : undef,
+					'confirm' => (    (exists $expat->{'style_options'}->{'confirm'}) &&
+							(defined $expat->{'style_options'}->{'confirm'}) ) ? $expat->{'style_options'}->{'confirm'} : undef
 					},
 				RDFStore_model => $expat->{'RDFStore_model'}, #import into current one
 				imports => $expat->{'imports'}

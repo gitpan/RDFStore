@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: backend_bdb_store.c,v 1.11 2004/08/19 18:57:12 areggiori Exp $
+# $Id: backend_bdb_store.c,v 1.21 2006/06/19 10:10:21 areggiori Exp $
 */
 
 #include "dbms.h"
@@ -208,12 +208,35 @@ backend_bdb_reset_debuginfo(
 	me->num_dec = 0;
 	me->num_sync = 0;
 	me->num_next = 0;
+	me->num_from = 0;
 	me->num_first = 0;
 	me->num_delete = 0;
 	me->num_clear = 0;
 	me->num_exists = 0;
 #endif
 };
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_bdb_compare_int(
+        const DBT *a,
+        const DBT *b );
+#else
+static int rdfstore_backend_bdb_compare_int(
+        DB *file,
+        const DBT *a,
+        const DBT *b );
+#endif
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_bdb_compare_double(
+        const DBT *a,
+        const DBT *b );
+#else
+static int rdfstore_backend_bdb_compare_double(
+        DB *file,
+        const DBT *a,
+        const DBT *b );
+#endif
 
 /*
  * NOTE: all the functions return 0 on success and non zero value if error
@@ -232,7 +255,8 @@ backend_bdb_open(
 		 void *(*_my_malloc) (size_t size),
 		 void (*_my_free) (void *),
 		 void (*_my_report) (dbms_cause_t cause, int count),
-		 void (*_my_error) (char *err, int erx)
+		 void (*_my_error) (char *err, int erx),
+		 int bt_compare_fcn_type
 )
 {
 	backend_bdb_t **mme = (backend_bdb_t **) emme;
@@ -248,6 +272,18 @@ backend_bdb_open(
 		NULL,		/* hash function */
 		0		/* use current host order */
 	};
+#endif
+
+#ifdef BERKELEY_DB_1_OR_2 /* Berkeley DB Version 1  or 2 */
+#ifdef DB_VERSION_MAJOR
+	DB_INFO       btreeinfo;
+	memset(&btreeinfo, 0, sizeof(btreeinfo));
+	btreeinfo.bt_compare = ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_bdb_compare_int : ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_bdb_compare_double : NULL ;
+#else
+	BTREEINFO       btreeinfo;
+	memset(&btreeinfo, 0, sizeof(btreeinfo));
+	btreeinfo.compare = ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_bdb_compare_int : ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_bdb_compare_double : NULL ;
+#endif
 #endif
 
 	*mme = NULL;
@@ -270,6 +306,8 @@ backend_bdb_open(
 	me->error = _my_error;
 	me->malloc = _my_malloc;
 	me->free = _my_free;
+
+	me->bt_compare_fcn_type = bt_compare_fcn_type;
 
 	bzero(me->err, sizeof(me->err));
 
@@ -331,7 +369,7 @@ backend_bdb_open(
 #ifdef DB_VERSION_MAJOR
 		if ( 	(db_open( buff, 
 					DB_BTREE, ((ro==0 || buff==NULL) ? ( DB_CREATE ) : ( DB_RDONLY ) ),
-					0666, NULL, NULL, &me->bdb )) ||
+					0666, NULL, &btreeinfo, &me->bdb )) ||
 #if DB_VERSION_MAJOR == 2 && DB_VERSION_MINOR < 6
             		((me->bdb->cursor)(me->bdb, NULL, &me->cursor))
 #else
@@ -343,11 +381,22 @@ backend_bdb_open(
 #if defined(DB_LIBRARY_COMPATIBILITY_API) && DB_VERSION_MAJOR > 2
 		if (!(me->bdb = (DB *)__db185_open(	buff, 
 						((ro==0 || buff==NULL) ? (O_RDWR | O_CREAT) : ( O_RDONLY ) ),
-						0666, DB_BTREE, NULL ))) {
+						0666, DB_BTREE, &btreeinfo ))) {
 #else
 		/* for unpatched db-1.85 when use in-memory DB_BTREE due to mkstemp() call in hash/hash_page.c open_temp() 
 		   i.e. HASHVERSION==2 we use DB_BTREE instead in CGI/mod_perl environments to avoid problems with errors
 		   like 'Permission denied' due the Web server running in a different user under a different directory */
+
+#if DIRKX_DEBUG
+BTREEINFO openinfo = {
+	0,
+	32 * 1024 * 1024,
+	0,
+	atoi(getenv("PSIZE")),
+	64 * 1024,
+	NULL, NULL, 0
+};
+#endif
 		if (!(me->bdb = (DB *)dbopen(	buff, 
 						((ro==0 || buff==NULL) ? (O_RDWR | O_CREAT) : ( O_RDONLY ) ),
 						0666,
@@ -356,7 +405,12 @@ backend_bdb_open(
 #else
 						DB_BTREE,
 #endif
-						NULL ))) {
+#if DIRKX_DEBUG
+						&openinfo))) {
+#else
+						&btreeinfo ))) {
+#endif
+
 #endif /* DB_LIBRARY_COMPATIBILITY_API */
 
 #endif
@@ -368,6 +422,13 @@ backend_bdb_open(
                 	fprintf(stderr,"Could not open/create '%s':\n",buff); 
 			_my_free(me);
                 	return FLAT_STORE_E_CANNOTOPEN;
+			};
+
+		/* set the b-tree comparinson function to the one passed */
+		if( bt_compare_fcn_type != 0 ) {
+			me->bdb->set_bt_compare(me->bdb, ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? 
+							rdfstore_backend_bdb_compare_int : ( bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? 
+												rdfstore_backend_bdb_compare_double : NULL );
 			};
 
 		me->bdb->set_errfile(me->bdb,stderr);
@@ -390,14 +451,10 @@ backend_bdb_open(
 		if ( 	(me->bdb->open( me->bdb,
 					buff, 
 					NULL,
-					DB_HASH, ((ro==0 || buff==NULL) ? ( DB_CREATE ) : ( DB_RDONLY ) ),
+					DB_BTREE, ((ro==0 || buff==NULL) ? ( DB_CREATE ) : ( DB_RDONLY ) ),
 					0666 )) ||
 #endif
 			((me->bdb->cursor)(me->bdb, NULL, &me->cursor, 0)) ) {
-/*
-			(void)me->bdb->set_h_ffactor(me->bdb, 1024);
-			(void)me->bdb->set_h_nelem(me->bdb, (u_int32_t)6000);
-*/
 #endif /* Berkeley DB Version > 2 */
 
 			rdfstore_flat_store_set_error((void*)me,"Could not open/create database",FLAT_STORE_E_CANNOTOPEN);
@@ -406,6 +463,13 @@ backend_bdb_open(
 			_my_free(me);
                 	return FLAT_STORE_E_CANNOTOPEN;
 			};
+
+#ifndef BERKELEY_DB_1_OR_2 /* Berkeley DB Version > 2 */
+/*
+		(void)me->bdb->set_h_ffactor(me->bdb, 1024);
+		(void)me->bdb->set_h_nelem(me->bdb, (u_int32_t)6000);
+*/
+#endif
 
 #ifdef RDFSTORE_FLAT_STORE_DEBUG
         fprintf(stderr,"rdfstore_flat_store_open '%s'\n",me->filename);
@@ -626,8 +690,12 @@ backend_bdb_delete(
 
 #ifdef DB_VERSION_MAJOR
 	retval = ((me->bdb)->del) (me->bdb, NULL, &key, 0);
+	if( retval == DB_NOTFOUND )
+		return FLAT_STORE_E_NOTFOUND;
 #else
 	retval = ((me->bdb)->del) (me->bdb, &key, 0);
+	if ( retval == 1 )
+		return FLAT_STORE_E_NOTFOUND;
 #endif
 	return retval;
 };
@@ -640,6 +708,18 @@ backend_bdb_clear(
 	backend_bdb_t  *me = (backend_bdb_t *) eme;
 	char           *buff;
 
+#ifdef BERKELEY_DB_1_OR_2 /* Berkeley DB Version 1  or 2 */
+#ifdef DB_VERSION_MAJOR
+        DB_INFO       btreeinfo;
+        memset(&btreeinfo, 0, sizeof(btreeinfo));
+        btreeinfo.bt_compare = ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_bdb_compare_int : ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_bdb_compare_double : NULL ;
+#else
+        BTREEINFO       btreeinfo;
+        memset(&btreeinfo, 0, sizeof(btreeinfo));
+        btreeinfo.compare = ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? rdfstore_backend_bdb_compare_int : ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? rdfstore_backend_bdb_compare_double : NULL  ;
+#endif
+#endif
+
 #ifdef RDFSTORE_FLAT_STORE_DEBUG
 	me->num_store = 0;
 	me->num_fetch = 0;
@@ -647,6 +727,7 @@ backend_bdb_clear(
 	me->num_dec = 0;
 	me->num_sync = 0;
 	me->num_next = 0;
+	me->num_from = 0;
 	me->num_first = 0;
 	me->num_delete = 0;
 	me->num_exists = 0;
@@ -683,7 +764,7 @@ backend_bdb_clear(
 #ifdef DB_VERSION_MAJOR
 	if ((db_open(buff,
 		     DB_BTREE, DB_CREATE,
-		     0666, NULL, NULL, &me->bdb)) ||
+		     0666, NULL, &btreeinfo, &me->bdb)) ||
 #if DB_VERSION_MAJOR == 2 && DB_VERSION_MINOR < 6
 	    ((me->bdb->cursor) (me->bdb, NULL, &me->cursor))
 #else
@@ -695,11 +776,11 @@ backend_bdb_clear(
 #if defined(DB_LIBRARY_COMPATIBILITY_API) && DB_VERSION_MAJOR > 2
 	if (!(me->bdb = (DB *) __db185_open(buff,
 					    O_RDWR | O_CREAT,
-					    0666, DB_BTREE, NULL))) {
+					    0666, DB_BTREE, &btreeinfo))) {
 #else
 	if (!(me->bdb = (DB *) dbopen(buff,
 				      O_RDWR | O_CREAT,
-				      0666, DB_BTREE, NULL))) {
+				      0666, DB_BTREE, &btreeinfo))) {
 #endif				/* DB_LIBRARY_COMPATIBILITY_API */
 
 #endif
@@ -712,6 +793,15 @@ backend_bdb_clear(
 		return FLAT_STORE_E_CANNOTOPEN;
 	};
 
+	/* set the b-tree comparinson function to the one passed */
+	if( me->bt_compare_fcn_type != 0 ) {
+		me->bdb->set_bt_compare(me->bdb, ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_INT ) ? 
+						rdfstore_backend_bdb_compare_int : ( me->bt_compare_fcn_type == FLAT_STORE_BT_COMP_DOUBLE ) ? 
+											rdfstore_backend_bdb_compare_double : NULL );
+		};
+
+	me->bdb->set_errfile(me->bdb,stderr);
+	me->bdb->set_errpfx(me->bdb,"BerkelyDB");
 #if DB_VERSION_MAJOR == 3 && DB_VERSION_MINOR < 3
 	me->bdb->set_malloc(me->bdb, me->malloc);
 #elif DB_VERSION_MAJOR > 3 || DB_VERSION_MINOR >= 3
@@ -748,6 +838,41 @@ backend_bdb_clear(
 };
 
 rdfstore_flat_store_error_t
+backend_bdb_from(
+		  void *eme,
+		  DBT closest_key,
+		  DBT * key
+)
+{
+	backend_bdb_t  *me = (backend_bdb_t *) eme;
+	int             retval;
+	DBT             val;
+
+#ifdef RDFSTORE_FLAT_STORE_DEBUG
+	fprintf(stderr, "backend_bdb_from num=%d from '%s'\n", ++(me->num_from), me->filename);
+#endif
+
+	memset(&val, 0, sizeof(val));
+
+	/* seek to closest_key and discard val */
+	memcpy(key, &closest_key, sizeof(closest_key));
+
+#if DB_VERSION_MAJOR >= 2
+	retval = (me->cursor->c_get) (me->cursor, key, &val, DB_SET_RANGE);
+#else
+	retval = (me->bdb->seq) (me->bdb, key, &val, R_CURSOR);
+#endif
+
+	if (retval == 0) {
+                /*
+                 * to ensure reentrancy we do a copy into caller space of what BDB layer returns
+                 */
+		(*key) = backend_bdb_kvdup(me, *key);
+                };
+	return retval;
+};
+
+rdfstore_flat_store_error_t
 backend_bdb_first(
 		  void *eme,
 		  DBT * first_key
@@ -761,39 +886,22 @@ backend_bdb_first(
 	fprintf(stderr, "backend_bdb_first num=%d from '%s'\n", ++(me->num_first), me->filename);
 #endif
 
-
+	memset(first_key, 0, sizeof(*first_key));
 	memset(&val, 0, sizeof(val));
 
 #if DB_VERSION_MAJOR >= 2
-	/*
-	 * we do not care about val memory managment due we just need the key
-	 * out
-	 */
-	memset(first_key, 0, sizeof(*first_key));
-	(*first_key).flags = DB_DBT_MALLOC;
-	retval = (me->cursor->c_get) (me->cursor, first_key, &val, R_FIRST);
+	retval = (me->cursor->c_get) (me->cursor, first_key, &val, DB_FIRST);
 #else
 	retval = (me->bdb->seq) (me->bdb, first_key, &val, R_FIRST);
 #endif
 
-	if (retval != 0) {
-#if DB_VERSION_MAJOR >= 2
-		if ((*first_key).data && (*first_key).size)
-			me->free((*first_key).data);	/* not sure this free is
-							 * needed! */
-#endif
-		memset(first_key, 0, sizeof(*first_key));
-		(*first_key).data = NULL;
-	} else {
-#if DB_VERSION_MAJOR < 2
+	if (retval == 0) {
 		/*
-		 * Berkeley DB 1.85 don't malloc the data for the caller
-		 * application duplicate the returned value to ensure
-		 * reentrancy
+		 * to ensure reentrancy we do a copy into caller space of what BDB layer returns
 		 */
 		(*first_key) = backend_bdb_kvdup(me, *first_key);
-#endif
-	};
+		};
+
 	return retval;
 };
 
@@ -812,39 +920,24 @@ backend_bdb_next(
 	fprintf(stderr, "backend_bdb_next num=%d from '%s'\n", ++(me->num_next), me->filename);
 #endif
 
-
+	memset(next_key, 0, sizeof(*next_key));
 	memset(&val, 0, sizeof(val));
 
+	/* we really do not use/consider previous_key to carry out next_key - val is discarded */
+
 #if DB_VERSION_MAJOR >= 2
-	/*
-	 * we do not care about val memory managment due we just need the key
-	 * out
-	 */
-	memset(next_key, 0, sizeof(*next_key));
-	(*next_key).flags = DB_DBT_MALLOC;
-	retval = (me->cursor->c_get) (me->cursor, next_key, &val, R_NEXT);
+	retval = (me->cursor->c_get) (me->cursor, next_key, &val, DB_NEXT);
 #else
 	retval = (me->bdb->seq) (me->bdb, next_key, &val, R_NEXT);
 #endif
 
-	if (retval != 0) {
-#if DB_VERSION_MAJOR >= 2
-		if ((*next_key).data && (*next_key).size)
-			me->free((*next_key).data);	/* not sure this free is
-							 * needed! */
-#endif
-		memset(next_key, 0, sizeof(*next_key));
-		(*next_key).data = NULL;
-	} else {
-#if DB_VERSION_MAJOR < 2
-		/*
-		 * Berkeley DB 1.85 don't malloc the data for the caller
-		 * application duplicate the returned value to ensure
-		 * reentrancy
-		 */
+	if (retval == 0) {
+                /*
+                 * to ensure reentrancy we do a copy into caller space of what BDB layer returns
+                 */
 		(*next_key) = backend_bdb_kvdup(me, *next_key);
-#endif
-	};
+                };
+
 	return retval;
 };
 
@@ -986,6 +1079,59 @@ backend_bdb_isremote(
 {
 	return 0;
 }
+
+/* misc subroutines */
+
+/*
+ * The following compare function are used for btree(s) for basic
+ * XML-Schema data types xsd:integer, xsd:double (and will xsd:date)
+ *
+ * They return:
+ *      < 0 if a < b
+ *      = 0 if a = b
+ *      > 0 if a > b
+ */
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_bdb_compare_int(
+        const DBT *a,
+        const DBT *b ) {
+#else
+static int rdfstore_backend_bdb_compare_int(
+        DB *file,
+        const DBT *a,
+        const DBT *b ) {
+#endif
+        long ai, bi;
+
+        memcpy(&ai, a->data, sizeof(long));
+        memcpy(&bi, b->data, sizeof(long));
+
+        return (ai - bi);
+        };
+
+#ifdef BERKELEY_DB_1_OR_2
+static int rdfstore_backend_bdb_compare_double(
+        const DBT *a,
+        const DBT *b ) {
+#else
+static int rdfstore_backend_bdb_compare_double(
+        DB *file,
+        const DBT *a,
+        const DBT *b ) {
+#endif
+        double ad,bd;
+
+        memcpy(&ad, a->data, sizeof(double));
+        memcpy(&bd, b->data, sizeof(double));
+
+        if (  ad <  bd ) {
+                return -1;
+        } else if (  ad  >  bd) {
+                return 1;
+                };
+
+        return 0;
+        };
 
 /*
  * returns null and/or full path to a hashed directory tree. the final

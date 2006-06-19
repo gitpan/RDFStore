@@ -1,6 +1,6 @@
 /*
 ##############################################################################
-# 	Copyright (c) 2000-2004 All rights reserved
+# 	Copyright (c) 2000-2006 All rights reserved
 # 	Alberto Reggiori <areggiori@webweaving.org>
 #	Dirk-Willem van Gulik <dirkx@webweaving.org>
 #
@@ -63,7 +63,7 @@
 #
 ##############################################################################
 #
-# $Id: backend_store.h,v 1.3 2004/08/19 18:57:43 areggiori Exp $
+# $Id: backend_store.h,v 1.6 2006/06/19 10:10:23 areggiori Exp $
 #
 */
 
@@ -77,7 +77,8 @@ typedef struct backend_store_struct {
 	rdfstore_flat_store_error_t (*open)(int remote, int ro, void * * mme, char * dir,
 			char * name, unsigned int local_hash_flags, char *          host, int             port,
         		void *(*_my_malloc)( size_t size), void(*_my_free)(void *),
-			void(*_my_report)(dbms_cause_t cause, int count), void(*_my_error)(char * err, int erx)
+			void(*_my_report)(dbms_cause_t cause, int count), void(*_my_error)(char * err, int erx),
+			int bt_compare_fcn_type
 		);
 	rdfstore_flat_store_error_t (*close) (void * me);
 	rdfstore_flat_store_error_t (*fetch) (void * me, DBT key, DBT * val);
@@ -95,8 +96,9 @@ typedef struct backend_store_struct {
 	rdfstore_flat_store_error_t (*delete) (void * me, DBT key); 
 	rdfstore_flat_store_error_t (*sync) (void * me); 
 	rdfstore_flat_store_error_t (*clear) (void * me);
+	rdfstore_flat_store_error_t (*from) (void * me, DBT closest_key, DBT * key);
 	rdfstore_flat_store_error_t (*first) (void * me, DBT * first_key);
-	rdfstore_flat_store_error_t (*next) (void * me, DBT revious_key, DBT* next_key);
+	rdfstore_flat_store_error_t (*next) (void * me, DBT previous_key, DBT * next_key);
 	rdfstore_flat_store_error_t (*inc) (void * me, DBT key, DBT * new_value);
 	rdfstore_flat_store_error_t (*dec) (void * me, DBT key, DBT * new_value); 
 	void (*reset_debuginfo)( void * me );
@@ -106,7 +108,7 @@ typedef struct backend_store_struct {
 	int (*isremote)(void * me);
 	} backend_store_t;
 
-#define API (2003110101)
+#define API (2004111401)
 
 #define DECLARE_MODULE_BACKEND( prefix, name, version ) \
 backend_store_t prefix ## _module = { \
@@ -123,6 +125,7 @@ backend_store_t prefix ## _module = { \
 	&prefix ## _delete, \
 	&prefix ## _sync, \
 	&prefix ## _clear, \
+	&prefix ## _from, \
 	&prefix ## _first, \
 	&prefix ## _next, \
 	&prefix ## _inc, \

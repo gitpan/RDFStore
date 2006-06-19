@@ -1,5 +1,5 @@
 # *
-# *     Copyright (c) 2000-2004 Alberto Reggiori <areggiori@webweaving.org>
+# *     Copyright (c) 2000-2006 Alberto Reggiori <areggiori@webweaving.org>
 # *                        Dirk-Willem van Gulik <dirkx@webweaving.org>
 # *
 # * NOTICE
@@ -12,6 +12,8 @@
 # *
 # * Changes:
 # *	version 0.1 - Tue Apr  8 00:28:24 CEST 2003
+# *	version 0.2
+# *		- updated wget() method invocation
 # *
 
 package RDFStore::Parser::NTriples;
@@ -290,10 +292,10 @@ sub parsefile {
                 $file_uri= URI->new(((defined $scheme) ? $scheme : '' ).$file);
 		if (	(defined $file_uri) && (defined $file_uri->scheme)	&&
 			($file_uri->scheme ne 'file') ) {
-  			my $wget_handle = $class->wget($file_uri);
-			if(defined $wget_handle) {
+  			my $content = $class->wget($file_uri);
+			if(defined $content) {
 				eval {
-					$ret = $class->parse($wget_handle, $file_uri,@_);
+					$ret = $class->parsestring($content, $file_uri,@_);
     				};
     				my $err = $@;
     				croak $err 	
@@ -382,10 +384,10 @@ RDFStore::Parser::NTriples - This module implements a streaming N-Triples parser
                 ErrorContext 	=> 2,
 		Style           => 'RDFStore::Parser::Styles::RDFStore::Model',
                 NodeFactory     => new RDFStore::NodeFactory(),
-                store   =>      {
+                style_options   =>      {
                                         persistent      =>      1,
                                         seevalues       =>      1,
-                                        options         =>      { name => '/tmp/test' }
+                                        store_options         =>      { Name => '/tmp/test' }
                                 }
         );
 	$pstore->parsefile('http://www.gils.net/bsr-gils.nt');
